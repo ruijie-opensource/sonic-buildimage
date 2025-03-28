@@ -1,0 +1,63 @@
+diff --git a/syncd/SaiDiscovery.cpp b/syncd/SaiDiscovery.cpp
+index 7f88846..82dcd64 100644
+--- a/syncd/SaiDiscovery.cpp
++++ b/syncd/SaiDiscovery.cpp
+@@ -177,11 +177,12 @@ void SaiDiscovery::discover(
+ 
+                 if (ot == SAI_OBJECT_TYPE_NULL)
+                 {
+-                    SWSS_LOG_THROW("when query %s (on %s RID %s) got value %s objectTypeQuery returned NULL object type",
++                    SWSS_LOG_ERROR("when query %s (on %s RID %s) got value %s objectTypeQuery returned NULL object type",
+                             md->attridname,
+                             sai_serialize_object_type(md->objecttype).c_str(),
+                             sai_serialize_object_id(rid).c_str(),
+                             sai_serialize_object_id(attr.value.oid).c_str());
++                    continue;
+                 }
+             }
+ 
+@@ -234,11 +235,12 @@ void SaiDiscovery::discover(
+ 
+                 if (ot == SAI_OBJECT_TYPE_NULL)
+                 {
+-                    SWSS_LOG_THROW("when query %s (on %s RID %s) got value %s objectTypeQuery returned NULL object type",
++                    SWSS_LOG_ERROR("when query %s (on %s RID %s) got value %s objectTypeQuery returned NULL object type",
+                             md->attridname,
+                             sai_serialize_object_type(md->objecttype).c_str(),
+                             sai_serialize_object_id(rid).c_str(),
+                             sai_serialize_object_id(oid).c_str());
++                    continue;
+                 }
+ 
+                 discover(oid, discovered); // recursion
+diff --git a/syncd/SaiSwitch.cpp b/syncd/SaiSwitch.cpp
+index fb711db..c5ba48e 100644
+--- a/syncd/SaiSwitch.cpp
++++ b/syncd/SaiSwitch.cpp
+@@ -1106,17 +1106,20 @@ void SaiSwitch::postPortRemove(
+ 
+         if (vid == SAI_NULL_OBJECT_ID)
+         {
+-            SWSS_LOG_THROW("expected rid %s to be present in RIDTOVID",
++            /* brkout port will remove all lanes of same port group when remove fist port, so not throw*/
++            SWSS_LOG_ERROR("expected rid %s to be present in RIDTOVID",
+                     sai_serialize_object_id(rid).c_str());
+         }
++        else
++        {
++            // TODO should this remove rid,vid and object be as db op?
+ 
+-        // TODO should this remove rid,vid and object be as db op?
+-
+-        m_translator->eraseRidAndVid(rid, vid);
++            m_translator->eraseRidAndVid(rid, vid);
+ 
+-        // remove from ASIC DB
++            // remove from ASIC DB
+ 
+-        m_client->removeAsicObject(vid);
++            m_client->removeAsicObject(vid);
++        }
+     }
+ 
+     int removed = m_client->removePortFromLanesMap(m_switch_vid, portRid);

@@ -1,0 +1,17 @@
+diff --git a/orchagent/portsorch.cpp b/orchagent/portsorch.cpp
+index 14b6d178..d3dee662 100644
+--- a/orchagent/portsorch.cpp
++++ b/orchagent/portsorch.cpp
+@@ -1682,11 +1682,7 @@ bool PortsOrch::setPortAdminStatus(Port &port, bool state)
+         {
+             setHostTxReady(port, "false");
+         }
+-        task_process_status handle_status = handleSaiSetStatus(SAI_API_PORT, status);
+-        if (handle_status != task_success)
+-        {
+-            return parseHandleSaiStatusFailure(handle_status);
+-        }
++        return true;
+     }
+ 
+     bool gbstatus = setGearboxPortsAttr(port, SAI_PORT_ATTR_ADMIN_STATE, &state);
