@@ -1,0 +1,459 @@
+From 15ee6b36e2cc1026735546db9217062c078e4f66 Mon Sep 17 00:00:00 2001
+From: ruijie-opensource <opensource@ruijie.com.cn>
+Date: Sat, 29 Mar 2025 16:58:38 +0800
+Subject: [PATCH] sonic-platform-daemons-changes
+
+---
+ sonic-xcvrd/setup.cfg                         |   1 -
+ sonic-xcvrd/xcvrd/xcvrd.py                    | 232 ++++++++++++------
+ .../xcvrd/xcvrd_utilities/port_mapping.py     |  10 +-
+ 3 files changed, 165 insertions(+), 78 deletions(-)
+
+diff --git a/sonic-xcvrd/setup.cfg b/sonic-xcvrd/setup.cfg
+index b7e4789..41975a7 100644
+--- a/sonic-xcvrd/setup.cfg
++++ b/sonic-xcvrd/setup.cfg
+@@ -1,2 +1 @@
+ [aliases]
+-test=pytest
+diff --git a/sonic-xcvrd/xcvrd/xcvrd.py b/sonic-xcvrd/xcvrd/xcvrd.py
+index d1334ec..2d7d1d1 100644
+--- a/sonic-xcvrd/xcvrd/xcvrd.py
++++ b/sonic-xcvrd/xcvrd/xcvrd.py
+@@ -636,6 +636,43 @@ def check_port_in_range(range_str, physical_port):
+     return False
+ 
+ 
++def media_key_fuzzy_match(key, media_key):
++    try:
++        media_key_splits = media_key.split(',')
++        media_key = media_key_splits[0]
++
++        max_value = max(len(media_key_splits), 3 - key.count(None))
++
++        result = 0
++
++        if (media_key in key[0]) or (media_key in key[1]):
++            result = result + 1
++        else:
++            return 0
++
++        if len(media_key_splits) == 1:
++            return result/max_value + 0.1
++
++        media_type = media_key_splits[1]
++
++        if (media_type == key[2]):
++            result = result + 1
++        else:
++            return result/max_value
++
++        if len(media_key_splits) == 2:
++            return result/max_value + 0.2
++
++        cable_length = media_key_splits[2]
++
++        if (float(cable_length) == key[3]):
++            result = result + 1
++
++        return result/max_value
++
++    except:
++        return 0
++
+ def get_media_settings_value(physical_port, key):
+     GLOBAL_MEDIA_SETTINGS_KEY = 'GLOBAL_MEDIA_SETTINGS'
+     PORT_MEDIA_SETTINGS_KEY = 'PORT_MEDIA_SETTINGS'
+@@ -672,8 +709,6 @@ def get_media_settings_value(physical_port, key):
+             # fetch those values
+             if key[0] in media_dict:
+                 return media_dict[key[0]]
+-            elif key[0].split('-')[0] in media_dict:
+-                return media_dict[key[0].split('-')[0]]
+             elif key[1] in media_dict:
+                 return media_dict[key[1]]
+             elif DEFAULT_KEY in media_dict:
+@@ -696,13 +731,20 @@ def get_media_settings_value(physical_port, key):
+ 
+         if key[0] in media_dict:
+             return media_dict[key[0]]
+-        elif key[0].split('-')[0] in media_dict:
+-            return media_dict[key[0].split('-')[0]]
+-        elif key[1] in media_dict:
+-            return media_dict[key[1]]
+-        elif DEFAULT_KEY in media_dict:
++
++        retval = None
++        flag = 0
++        for media_key, value in media_dict.items():
++            match_point = media_key_fuzzy_match(key, media_key)
++            if match_point > flag:
++                retval = value
++                flag = match_point
++        if flag > 0:
++            return retval
++
++        if DEFAULT_KEY in media_dict:
+             return media_dict[DEFAULT_KEY]
+-        elif len(default_dict) != 0:
++        if len(default_dict) != 0:
+             return default_dict
+     else:
+         if len(default_dict) != 0:
+@@ -754,7 +796,20 @@ def get_media_settings_key(physical_port, transceiver_dict):
+     else:
+         media_key += '-' + '*'
+ 
+-    return [vendor_key, media_key]
++    media_type_ex = "fiber"
++    try:
++        if (type(media_len) != int) and (type(media_len) != float):
++            media_len = None
++        for key, value in transceiver_dict[physical_port].items():
++            if type(value) != str:
++                continue
++            if value.lower().find("copper") >=0:
++                media_type_ex = "copper"
++                break
++    except Exception as e:
++        helper_logger.log_error("Invalid value for port {}: {}".format(physical_port, str(e)))
++
++    return [vendor_key, media_key, media_type_ex, media_len]
+ 
+ def get_media_val_str_from_dict(media_dict):
+     LANE_STR = 'lane'
+@@ -818,39 +873,40 @@ def notify_media_setting(logical_port_name, transceiver_dict,
+ 
+     for physical_port in physical_port_list:
+         logical_port_list = port_mapping.get_physical_to_logical(physical_port)
+-        num_logical_ports = len(logical_port_list)
+-        logical_idx = logical_port_list.index(logical_port_name)
+-        if not _wrapper_get_presence(physical_port):
+-            helper_logger.log_info("Media {} presence not detected during notify".format(physical_port))
+-            continue
+-        if physical_port not in transceiver_dict:
+-            helper_logger.log_error("Media {} eeprom not populated in transceiver dict".format(physical_port))
+-            continue
++        for logical_idx in range(len(logical_port_list)):
++            num_logical_ports = len(logical_port_list)
++            logical_port_name = logical_port_list[logical_idx]
++            if not _wrapper_get_presence(physical_port):
++                helper_logger.log_info("Media {} presence not detected during notify".format(physical_port))
++                continue
++            if physical_port not in transceiver_dict:
++                helper_logger.log_error("Media {} eeprom not populated in transceiver dict".format(physical_port))
++                continue
+ 
+-        port_name = get_physical_port_name(logical_port_name,
+-                                           ganged_member_num, ganged_port)
+-        ganged_member_num += 1
+-        key = get_media_settings_key(physical_port, transceiver_dict)
+-        media_dict = get_media_settings_value(physical_port, key)
++            port_name = get_physical_port_name(logical_port_name,
++                                            ganged_member_num, ganged_port)
++            ganged_member_num += 1
++            key = get_media_settings_key(physical_port, transceiver_dict)
++            media_dict = get_media_settings_value(physical_port, key)
+ 
+-        if len(media_dict) == 0:
+-            helper_logger.log_error("Error in obtaining media setting for {}".format(logical_port_name))
+-            return
++            if len(media_dict) == 0:
++                helper_logger.log_error("Error in obtaining media setting for {}".format(logical_port_name))
++                return
+ 
+-        fvs = swsscommon.FieldValuePairs(len(media_dict))
++            fvs = swsscommon.FieldValuePairs(len(media_dict))
+ 
+-        index = 0
+-        for media_key in media_dict:
+-            if type(media_dict[media_key]) is dict:
+-                media_val_str = get_media_val_str(num_logical_ports,
+-                                                  media_dict[media_key],
+-                                                  logical_idx)
+-            else:
+-                media_val_str = media_dict[media_key]
+-            fvs[index] = (str(media_key), str(media_val_str))
+-            index += 1
++            index = 0
++            for media_key in media_dict:
++                if type(media_dict[media_key]) is dict:
++                    media_val_str = get_media_val_str(num_logical_ports,
++                                                    media_dict[media_key],
++                                                    logical_idx)
++                else:
++                    media_val_str = media_dict[media_key]
++                fvs[index] = (str(media_key), str(media_val_str))
++                index += 1
+ 
+-        app_port_tbl.set(port_name, fvs)
++            app_port_tbl.set(port_name, fvs)
+ 
+ 
+ def waiting_time_compensation_with_sleep(time_start, time_to_wait):
+@@ -948,12 +1004,13 @@ class CmisManagerTask(threading.Thread):
+         self.exc = None
+         self.task_stopping_event = threading.Event()
+         self.main_thread_stop_event = main_thread_stop_event
+-        self.port_dict = {}
++        self.port_dict = {k: {"asic_id": v} for k, v in port_mapping.logical_to_asic.items()}
+         self.port_mapping = copy.deepcopy(port_mapping)
+         self.isPortInitDone = False
+         self.isPortConfigDone = False
+         self.skip_cmis_mgr = skip_cmis_mgr
+         self.namespaces = namespaces
++        self.xcvr_table_helper = XcvrTableHelper(self.namespaces)
+ 
+     def log_notice(self, message):
+         helper_logger.log_notice("CMIS: {}".format(message))
+@@ -961,9 +1018,11 @@ class CmisManagerTask(threading.Thread):
+     def log_error(self, message):
+         helper_logger.log_error("CMIS: {}".format(message))
+ 
++    def get_asic_id(self, lport):
++        return self.port_dict.get(lport, {}).get("asic_id", -1)
++
+     def update_port_transceiver_status_table_sw_cmis_state(self, lport, cmis_state_to_set):
+-        asic_index = self.port_mapping.get_asic_id_for_logical_port(lport)
+-        status_table = self.xcvr_table_helper.get_status_tbl(asic_index)
++        status_table = self.xcvr_table_helper.get_status_tbl(self.get_asic_id(lport))
+         if status_table is None:
+             helper_logger.log_error("status_table is None while updating "
+                                     "sw CMIS state for lport {}".format(lport))
+@@ -978,6 +1037,7 @@ class CmisManagerTask(threading.Thread):
+ 
+         lport = port_change_event.port_name
+         pport = port_change_event.port_index
++        asic_id = port_change_event.asic_id
+ 
+         if lport in ['PortInitDone']:
+             self.isPortInitDone = True
+@@ -995,15 +1055,12 @@ class CmisManagerTask(threading.Thread):
+         if pport is None:
+             return
+ 
+-        # Skip if the port/cage type is not a CMIS
+-        # 'index' can be -1 if STATE_DB|PORT_TABLE
+-        if lport not in self.port_dict:
+-            self.port_dict[lport] = {}
+-
+         if port_change_event.port_dict is None:
+             return
+ 
+         if port_change_event.event_type == port_change_event.PORT_SET:
++            if lport not in self.port_dict:
++                self.port_dict[lport] = {"asic_id": port_change_event.asic_id}
+             if pport >= 0:
+                 self.port_dict[lport]['index'] = pport
+             if 'speed' in port_change_event.port_dict and port_change_event.port_dict['speed'] != 'N/A':
+@@ -1022,9 +1079,45 @@ class CmisManagerTask(threading.Thread):
+                 self.port_dict[lport]['subport'] = int(port_change_event.port_dict['subport'])
+ 
+             self.force_cmis_reinit(lport, 0)
+-        else:
+-            self.update_port_transceiver_status_table_sw_cmis_state(lport, CMIS_STATE_REMOVED)
+ 
++        elif port_change_event.event_type == port_change_event.PORT_DEL:
++            # In handling the DEL event, the following two scenarios must be considered:
++            # 1. PORT_DEL event due to transceiver plug-out
++            # 2. PORT_DEL event due to Dynamic Port Breakout (DPB)
++            #
++            # Scenario 1 is simple, as only a STATE_DB|TRANSCEIVER_INFO PORT_DEL event occurs,
++            # so we just need to set SW_CMIS_STATE to CMIS_STATE_REMOVED.
++            #
++            # Scenario 2 is a bit more complex. First, for the port(s) before DPB, a CONFIG_DB|PORT PORT_DEL
++            # and a STATE_DB|PORT_TABLE PORT_DEL event occur. Next, for the port(s) after DPB,
++            # a CONFIG_DB|PORT PORT_SET and a STATE_DB|PORT_TABLE PORT_SET event occur.
++            # After that (after a short delay), a STATE_DB|TRANSCEIVER_INFO PORT_DEL event
++            # occurs for the port(s) before DPB, and finally, a STATE_DB|TRANSCEIVER_INFO
++            # PORT_SET event occurs for the port(s) after DPB.
++            #
++            # Below is the event sequence when configuring Ethernet0 from "2x200G" to "1x400G"
++            # (based on actual logs).
++            #
++            # 1.  SET Ethernet0 CONFIG_DB|PORT
++            # 2.  DEL Ethernet2 CONFIG_DB|PORT
++            # 3.  DEL Ethernet0 CONFIG_DB|PORT
++            # 4.  DEL Ethernet0 STATE_DB|PORT_TABLE
++            # 5.  DEL Ethernet2 STATE_DB|PORT_TABLE
++            # 6.  SET Ethernet0 CONFIG_DB|PORT
++            # 7.  SET Ethernet0 STATE_DB|PORT_TABLE
++            # 8.  SET Ethernet0 STATE_DB|PORT_TABLE
++            # 9.  DEL Ethernet2 STATE_DB|TRANSCEIVER_INFO
++            # 10. DEL Ethernet0 STATE_DB|TRANSCEIVER_INFO
++            # 11. SET Ethernet0 STATE_DB|TRANSCEIVER_INFO
++            #
++            # To handle both scenarios, if the lport exists in port_dict for any DEL EVENT,
++            # set SW_CMIS_STATE to REMOVED. Additionally, for DEL EVENTS from CONFIG_DB due to DPB,
++            # remove the lport from port_dict.
++            if lport in self.port_dict:
++                self.update_port_transceiver_status_table_sw_cmis_state(lport, CMIS_STATE_REMOVED)
++
++            if port_change_event.db_name == 'CONFIG_DB' and port_change_event.table_name == 'PORT':
++                self.port_dict.pop(lport)
+     def get_interface_speed(self, ifname):
+         """
+         Get the port speed from the host interface name
+@@ -1340,8 +1433,7 @@ class CmisManagerTask(threading.Thread):
+            Return the Tx power configured by user in CONFIG_DB's PORT table
+         """
+         freq = 0
+-        asic_index = self.port_mapping.get_asic_id_for_logical_port(lport)
+-        port_tbl = self.xcvr_table_helper.get_cfg_port_tbl(asic_index)
++        port_tbl = self.xcvr_table_helper.get_cfg_port_tbl(self.get_asic_id(lport))
+ 
+         found, port_info = port_tbl.get(lport)
+         if found and 'laser_freq' in dict(port_info):
+@@ -1353,8 +1445,7 @@ class CmisManagerTask(threading.Thread):
+            Return the Tx power configured by user in CONFIG_DB's PORT table
+         """
+         power = 0
+-        asic_index = self.port_mapping.get_asic_id_for_logical_port(lport)
+-        port_tbl = self.xcvr_table_helper.get_cfg_port_tbl(asic_index)
++        port_tbl = self.xcvr_table_helper.get_cfg_port_tbl(self.get_asic_id(lport))
+ 
+         found, port_info = port_tbl.get(lport)
+         if found and 'tx_power' in dict(port_info):
+@@ -1364,8 +1455,7 @@ class CmisManagerTask(threading.Thread):
+     def get_host_tx_status(self, lport):
+         host_tx_ready = 'false'
+ 
+-        asic_index = self.port_mapping.get_asic_id_for_logical_port(lport)
+-        state_port_tbl = self.xcvr_table_helper.get_state_port_tbl(asic_index)
++        state_port_tbl = self.xcvr_table_helper.get_state_port_tbl(self.get_asic_id(lport))
+ 
+         found, port_info = state_port_tbl.get(lport)
+         if found and 'host_tx_ready' in dict(port_info):
+@@ -1375,8 +1465,7 @@ class CmisManagerTask(threading.Thread):
+     def get_port_admin_status(self, lport):
+         admin_status = 'down'
+ 
+-        asic_index = self.port_mapping.get_asic_id_for_logical_port(lport)
+-        cfg_port_tbl = self.xcvr_table_helper.get_cfg_port_tbl(asic_index)
++        cfg_port_tbl = self.xcvr_table_helper.get_cfg_port_tbl(self.get_asic_id(lport))
+ 
+         found, port_info = cfg_port_tbl.get(lport)
+         if found:
+@@ -1429,8 +1518,7 @@ class CmisManagerTask(threading.Thread):
+             media_lane_count = appl_advt_act.get('media_lane_count', 'N/A') if appl_advt_act else 'N/A'
+             tuple_list.append(('media_lane_count', str(media_lane_count)))
+ 
+-        asic_index = self.port_mapping.get_asic_id_for_logical_port(lport)
+-        intf_tbl = self.xcvr_table_helper.get_intf_tbl(asic_index)
++        intf_tbl = self.xcvr_table_helper.get_intf_tbl(self.get_asic_id(lport))
+         fvs = swsscommon.FieldValuePairs(tuple_list)
+         intf_tbl.set(lport, fvs)
+         self.log_notice("{}: updated TRANSCEIVER_INFO_TABLE {}".format(lport, tuple_list))
+@@ -1457,15 +1545,6 @@ class CmisManagerTask(threading.Thread):
+                 break
+ 
+     def task_worker(self):
+-        self.xcvr_table_helper = XcvrTableHelper(self.namespaces)
+-
+-        self.log_notice("Waiting for PortConfigDone...")
+-        for namespace in self.namespaces:
+-            self.wait_for_port_config_done(namespace)
+-
+-        logical_port_list = self.port_mapping.logical_port_list
+-        for lport in logical_port_list:
+-            self.update_port_transceiver_status_table_sw_cmis_state(lport, CMIS_STATE_UNKNOWN)
+ 
+         # APPL_DB for CONFIG updates, and STATE_DB for insertion/removal
+         sel, asic_context = port_mapping.subscribe_port_update_event(self.namespaces, helper_logger)
+@@ -1484,7 +1563,7 @@ class CmisManagerTask(threading.Thread):
+                 if lport not in self.port_dict:
+                     continue
+ 
+-                state = get_cmis_state_from_state_db(lport, self.xcvr_table_helper.get_status_tbl(self.port_mapping.get_asic_id_for_logical_port(lport)))
++                state = get_cmis_state_from_state_db(lport, self.xcvr_table_helper.get_status_tbl(self.get_asic_id(lport)))
+                 if state in CMIS_TERMINAL_STATES or state == CMIS_STATE_UNKNOWN:
+                     if state != CMIS_STATE_READY:
+                         self.port_dict[lport]['appl'] = 0
+@@ -1790,6 +1869,14 @@ class CmisManagerTask(threading.Thread):
+             return
+ 
+         try:
++
++            self.log_notice("Waiting for PortConfigDone...")
++            for namespace in self.namespaces:
++                self.wait_for_port_config_done(namespace)
++
++            for lport in self.port_dict.keys():
++                self.update_port_transceiver_status_table_sw_cmis_state(lport, CMIS_STATE_UNKNOWN)
++
+             self.task_worker()
+         except Exception as e:
+             helper_logger.log_error("Exception occured at {} thread due to {}".format(threading.current_thread().getName(), repr(e)))
+@@ -2588,20 +2675,13 @@ class DaemonXcvrd(daemon_base.DaemonBase):
+         # Load new platform api class
+         try:
+             import sonic_platform.platform
+-            import sonic_platform_base.sonic_sfp.sfputilhelper
+             platform_chassis = sonic_platform.platform.Platform().get_chassis()
+             self.log_info("chassis loaded {}".format(platform_chassis))
+-            # we have to make use of sfputil for some features
+-            # even though when new platform api is used for all vendors.
+-            # in this sense, we treat it as a part of new platform api.
+-            # we have already moved sfputil to sonic_platform_base
+-            # which is the root of new platform api.
+-            platform_sfputil = sonic_platform_base.sonic_sfp.sfputilhelper.SfpUtilHelper()
+         except Exception as e:
+             self.log_warning("Failed to load chassis due to {}".format(repr(e)))
+ 
+         # Load platform specific sfputil class
+-        if platform_chassis is None or platform_sfputil is None:
++        if platform_chassis is None:
+             try:
+                 platform_sfputil = self.load_platform_util(PLATFORM_SPECIFIC_MODULE_NAME, PLATFORM_SPECIFIC_CLASS_NAME)
+             except Exception as e:
+@@ -2760,7 +2840,7 @@ class XcvrTableHelper:
+         return self.dom_threshold_tbl[asic_id]
+ 
+     def get_status_tbl(self, asic_id):
+-        return self.status_tbl[asic_id]
++        return self.status_tbl.get(asic_id, None)
+ 
+     def get_pm_tbl(self, asic_id):
+         return self.pm_tbl[asic_id]
+diff --git a/sonic-xcvrd/xcvrd/xcvrd_utilities/port_mapping.py b/sonic-xcvrd/xcvrd/xcvrd_utilities/port_mapping.py
+index 788dc81..a83ea9c 100644
+--- a/sonic-xcvrd/xcvrd/xcvrd_utilities/port_mapping.py
++++ b/sonic-xcvrd/xcvrd/xcvrd_utilities/port_mapping.py
+@@ -1,3 +1,4 @@
++import re
+ from sonic_py_common import daemon_base
+ from sonic_py_common import multi_asic
+ from sonic_py_common.interface import backplane_prefix, inband_prefix, recirc_prefix
+@@ -5,6 +6,12 @@ from swsscommon import swsscommon
+ 
+ SELECT_TIMEOUT_MSECS = 1000
+ 
++def take_port_number(item):
++    # use first number
++    if isinstance(item, str):
++        return int(re.search("\d+", item).group())
++    else:
++        return item
+ 
+ class PortChangeEvent:
+     PORT_ADD = 0
+@@ -57,6 +64,7 @@ class PortMapping:
+             self.physical_to_logical[port_change_event.port_index] = [port_name]
+         else:
+             self.physical_to_logical[port_change_event.port_index].append(port_name)
++            self.physical_to_logical[port_change_event.port_index].sort(key=take_port_number)
+         self.logical_to_asic[port_name] = port_change_event.asic_id
+ 
+     def _handle_port_remove(self, port_change_event):
+@@ -69,7 +77,7 @@ class PortMapping:
+         self.logical_to_asic.pop(port_name)
+ 
+     def get_asic_id_for_logical_port(self, port_name):
+-        return self.logical_to_asic.get(port_name)
++        return self.logical_to_asic.get(port_name, 0)
+ 
+     def is_logical_port(self, port_name):
+         return port_name in self.logical_to_physical
+-- 
+2.25.1
+
