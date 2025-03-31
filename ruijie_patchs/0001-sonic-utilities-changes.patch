@@ -1,5 +1,5 @@
 From fcef534b728b9d2d8c8e97391569013a93bbb7f8 Mon Sep 17 00:00:00 2001
-From: duanchunming <duanchunming@ruijie.com.cn>
+From: ruijie-opensource <opensource@ruijie.com.cn>
 Date: Wed, 26 Mar 2025 17:22:47 +0800
 Subject: [PATCH] Summary: Split the specified order and send it to the database
 

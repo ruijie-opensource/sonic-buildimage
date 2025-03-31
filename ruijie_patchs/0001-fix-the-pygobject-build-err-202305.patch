@@ -1,5 +1,5 @@
 From 2337baf66f4e15af887f75674f4250de23f72ba8 Mon Sep 17 00:00:00 2001
-From: TGQ <tianguangqing@ruijie.com.cn>
+From: ruijie-opensource <opensource@ruijie.com.cn>
 Date: Sun, 23 Mar 2025 08:49:38 -0500
 Subject: [PATCH] fix the pygobject build err 20250321
 

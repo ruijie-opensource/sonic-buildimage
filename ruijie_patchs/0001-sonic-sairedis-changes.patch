@@ -1,5 +1,5 @@
 From 0ca00fd245482f88edaaa1470818a32d0f0d774d Mon Sep 17 00:00:00 2001
-From: duanchunming <duanchunming@ruijie.com.cn>
+From: ruijie-opensource <opensource@ruijie.com.cn>
 Date: Mon, 24 Mar 2025 14:13:25 +0800
 Subject: [PATCH] Summary: fix the port split coredump problem of td3
 

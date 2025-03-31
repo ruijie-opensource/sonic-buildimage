@@ -1,5 +1,5 @@
 From bb4e3e94ba004b49f2d984b221fcd16bb3a58d53 Mon Sep 17 00:00:00 2001
-From: TGQ <tianguangqing@ruijie.com.cn>
+From: ruijie-opensource <opensource@ruijie.com.cn>
 Date: Tue, 25 Mar 2025 10:12:47 +0800
 Subject: [PATCH] Summary:fix flashrom build err
 
