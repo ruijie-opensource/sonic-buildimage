@@ -1,5 +1,5 @@
 From 310b7f502bc271691acb160406f0e78ff1d97f1c Mon Sep 17 00:00:00 2001
-From: TGQ <tianguangqing@ruijie.com.cn>
+From: ruijie-opensource <opensource@ruijie.com.cn>
 Date: Fri, 21 Mar 2025 11:12:42 +0800
 Subject: [PATCH] Summary:fix openssh build err 20250320
 

@@ -1,5 +1,5 @@
 From f6942a89c79192388ae3d546c6070b30513487ea Mon Sep 17 00:00:00 2001
-From: TGQ <tianguangqing@ruijie.com.cn>
+From: ruijie-opensource <opensource@ruijie.com.cn>
 Date: Thu, 20 Mar 2025 19:45:45 +0800
 Subject: [PATCH] Summary:fix the flashrom build err 20250320
 
