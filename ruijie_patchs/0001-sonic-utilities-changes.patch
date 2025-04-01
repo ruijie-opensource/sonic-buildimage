@@ -1,16 +1,18 @@
-From fcef534b728b9d2d8c8e97391569013a93bbb7f8 Mon Sep 17 00:00:00 2001
+From 5c0c462a0830b114fc155b1feb7c6649d117d3d7 Mon Sep 17 00:00:00 2001
 From: ruijie-opensource <opensource@ruijie.com.cn>
-Date: Wed, 26 Mar 2025 17:22:47 +0800
-Subject: [PATCH] Summary: Split the specified order and send it to the database
+Date: Tue, 1 Apr 2025 14:15:23 +0800
+Subject: [PATCH] sonic-utilites-changes
 
-Change-Id: Id49c25fbb79556652237f0dc26086f9eb2f2e6c1
 ---
+ config/config_mgmt.py     | 11 ++++++++++-
+ tests/config_mgmt_test.py |  2 +-
+ 2 files changed, 11 insertions(+), 2 deletions(-)
 
 diff --git a/config/config_mgmt.py b/config/config_mgmt.py
-index 4e3115b..52513a8 100644
+index 4e3115bd..52513a87 100644
 --- a/config/config_mgmt.py
 +++ b/config/config_mgmt.py
-@@ -461,7 +461,16 @@
+@@ -461,7 +461,16 @@ class ConfigMgmtDPB(ConfigMgmt):
              # Verify in Asic DB,
              self._verifyAsicDB(db=dataBase, ports=delPorts, portMap=if_name_map, \
                  timeout=MAX_WAIT)
@@ -28,3 +30,19 @@ index 4e3115b..52513a8 100644
  
          except Exception as e:
              self.sysLog(doPrint=True, logLevel=syslog.LOG_ERR, msg=str(e))
+diff --git a/tests/config_mgmt_test.py b/tests/config_mgmt_test.py
+index b09fdd6b..c4edb628 100644
+--- a/tests/config_mgmt_test.py
++++ b/tests/config_mgmt_test.py
+@@ -123,7 +123,7 @@ class TestConfigMgmt(TestCase):
+             ['00:11:22:BB:CC:DD', '00:11:22:bb:cc:dd']
+ 
+         # verify correct function call to writeConfigDB
+-        assert cmdpb.writeConfigDB.call_count == 3
++        assert cmdpb.writeConfigDB.call_count == 4
+         print(cmdpb.writeConfigDB.call_args_list[0])
+         # args is populated if call is done as writeConfigDB(a, b), kwargs is
+         # populated if call is done as writeConfigDB(A=a, B=b)
+-- 
+2.25.1
+
