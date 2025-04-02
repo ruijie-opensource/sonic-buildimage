@@ -77,7 +77,8 @@ $(SONIC_ONE_IMAGE)_LAZY_INSTALLS += $(DELL_S6000_PLATFORM_MODULE) \
                                $(CEL_SILVERSTONE_PLATFORM_MODULE) \
                                $(JUNIPER_QFX5200_PLATFORM_MODULE) \
                                $(DELTA_AGC032_PLATFORM_MODULE) \
-                               $(RUIJIE_B6510-32CQ_PLATFORM_MODULE) \
+			       $(RUIJIE_B6510_32CQ_PLATFORM_MODULE) \
+			       $(RUIJIE_B6920_32QC_E_PLATFORM_MODULE) \
                                $(RAGILE_RA_B6510_48V8C_PLATFORM_MODULE) \
                                $(NOKIA_IXR7250_PLATFORM_MODULE) \
                                $(NOKIA_IXR7220H3_PLATFORM_MODULE) \
