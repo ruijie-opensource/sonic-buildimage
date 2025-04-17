@@ -1,0 +1,40 @@
+From 0ca00fd245482f88edaaa1470818a32d0f0d774d Mon Sep 17 00:00:00 2001
+From: ruijie-opensource <opensource@ruijie.com.cn>
+Date: Mon, 24 Mar 2025 14:13:25 +0800
+Subject: [PATCH] Summary: fix the port split coredump problem of td3
+
+
+Change-Id: I13a75efddf41dc77e8803629cdd03039766ea621
+---
+
+diff --git a/syncd/SaiSwitch.cpp b/syncd/SaiSwitch.cpp
+index fb711db..c5ba48e 100644
+--- a/syncd/SaiSwitch.cpp
++++ b/syncd/SaiSwitch.cpp
+@@ -1106,17 +1106,20 @@
+ 
+         if (vid == SAI_NULL_OBJECT_ID)
+         {
+-            SWSS_LOG_THROW("expected rid %s to be present in RIDTOVID",
++            /* brkout port will remove all lanes of same port group when remove fist port, so not throw*/
++            SWSS_LOG_ERROR("expected rid %s to be present in RIDTOVID",
+                     sai_serialize_object_id(rid).c_str());
+         }
++        else
++        {
++            // TODO should this remove rid,vid and object be as db op?
+ 
+-        // TODO should this remove rid,vid and object be as db op?
++            m_translator->eraseRidAndVid(rid, vid);
+ 
+-        m_translator->eraseRidAndVid(rid, vid);
++            // remove from ASIC DB
+ 
+-        // remove from ASIC DB
+-
+-        m_client->removeAsicObject(vid);
++            m_client->removeAsicObject(vid);
++        }
+     }
+ 
+     int removed = m_client->removePortFromLanesMap(m_switch_vid, portRid);
