@@ -1491,6 +1491,7 @@ static ssize_t flash_rw_enable_store(struct kobject *kobj, struct kobj_attribute
     u8 val;
     int ret;
 
+    val = 0;
     ret = kstrtou8(buf, 0, &val);
     if (ret) {
         DEBUG_ERROR("Invaild input value [%s], errno: %d\n", buf, ret);
@@ -1576,6 +1577,7 @@ static ssize_t reset_bmc_store(struct kobject *kobj, struct kobj_attribute *attr
     u8 cs;
     int ret;
 
+    cs = 0;
     ret = kstrtou8(buf, 0, &cs);
     if (ret) {
         DEBUG_ERROR("Invaild input value [%s], errno: %d\n", buf, ret);
@@ -1610,6 +1612,7 @@ static ssize_t flash_erase_full_store(struct kobject *kobj, struct kobj_attribut
     u8 val;
     int ret;
 
+    val = 0;
     ret = kstrtou8(buf, 0, &val);
     if (ret) {
         DEBUG_ERROR("Invaild input value [%s], errno: %d\n", buf, ret);

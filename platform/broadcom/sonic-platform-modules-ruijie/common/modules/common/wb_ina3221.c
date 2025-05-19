@@ -221,6 +221,7 @@ static inline int ina3221_wait_for_data(struct ina3221_data *ina)
     wait = ina3221_reg_to_interval_us(ina->reg_config);
 
     /* Polling the CVRF bit to make sure read data is ready */
+    cvrf = 0;
     return regmap_field_read_poll_timeout(ina->fields[F_CVRF],
                           cvrf, cvrf, wait, wait * 2);
 }
@@ -342,6 +343,7 @@ static int ina3221_read_curr(struct device *dev, u32 attr,
     int resistance_uo, voltage_nv;
     int regval, ret;
 
+    regval = 0;
     if (channel > INA3221_CHANNEL3)
         resistance_uo = ina->summation_shunt_resistor;
     else
@@ -721,6 +723,7 @@ static ssize_t ina3221_shunt_store(struct device *dev,
     int val;
     int ret;
 
+    val = 0;
     ret = kstrtoint(buf, 0, &val);
     if (ret)
         return ret;
@@ -896,6 +899,7 @@ static int ina3221_probe_child_from_dt(struct device *dev,
     u32 val;
     int ret;
 
+    val = 0;
     ret = of_property_read_u32(child, "reg", &val);
     if (ret) {
         dev_err(dev, "missing reg property of %pOFn\n", child);

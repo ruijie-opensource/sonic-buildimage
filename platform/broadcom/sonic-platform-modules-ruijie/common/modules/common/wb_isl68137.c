@@ -110,6 +110,7 @@ static ssize_t isl68137_avs_enable_store_page(struct i2c_client *client,
     int rc, op_val;
     bool result;
 
+    result = false;
     rc = kstrtobool(buf, &result);
     if (rc)
         return rc;
@@ -199,6 +200,7 @@ static ssize_t isl68137_avs_vout_store(struct device *dev, struct device_attribu
         return -EINVAL;
     }
 
+    vout = 0;
     ret = kstrtoint(buf, 0, &vout);
     if (ret) {
         DEBUG_ERROR("%d-%04x: invalid value: %s \n", client->adapter->nr, client->addr, buf);

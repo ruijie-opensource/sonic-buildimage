@@ -166,6 +166,8 @@ static int wb_bsp_create_timestamp(char *buf, int size)
     struct timespec64 ts;
 
     /* get timestamp_sec */
+    mem_clear(&tm, sizeof(tm));
+    mem_clear(&ts, sizeof(ts));
     ktime_get_real_ts64(&ts);
     time64_to_tm(ts.tv_sec, 0, &tm);
     mem_clear(buf, size);
@@ -548,7 +550,7 @@ int cache_value_write(const char *mask_file_path, const char *cache_file_path, u
     while (total_write < count) {
         mem_clear(mask_value, sizeof(mask_value));
         mem_clear(cache_value, sizeof(cache_value));
-        per_len = (count - total_write) > MAX_RW_LEN ? MAX_RW_LEN : (count - per_len);
+        per_len = (count - total_write) > MAX_RW_LEN ? MAX_RW_LEN : (count - total_write);
 
         ret = wb_dev_file_read(mask_file_path, offset, mask_value, per_len);
         if (ret < 0) {

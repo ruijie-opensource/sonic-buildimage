@@ -71,6 +71,7 @@ static ssize_t system_value_store(struct switch_obj *obj, struct switch_attribut
     system_attr = to_switch_device_attr(attr);
     check_p(system_attr);
 
+    value = 0;
     ret = kstrtoint(buf, 0, &value);
     if (ret) {
         SYSTEM_ERR("system_value_store, input parameter: %s error. ret:%d\n", buf, ret);
@@ -120,6 +121,7 @@ static ssize_t system_bmc_switch(struct switch_obj *obj, struct switch_attribute
     check_p(g_system_drv);
     check_p(g_system_drv->set_bmc_switch);
 
+    value = 0;
     ret = kstrtoint(buf, 0, &value);
     if (ret) {
         SYSTEM_ERR("system_bmc_switch, input parameter: %s error. ret:%d\n", buf, ret);

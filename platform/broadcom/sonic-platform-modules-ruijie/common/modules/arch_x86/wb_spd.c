@@ -36,6 +36,7 @@ static int intel_d1500_spd_rdata_valid(struct pci_dev *pdev, u32 *read_value)
 {
     int timeout, ret;
 
+    timeout = 0;
     while (1) {
         ret = pci_read_config_dword(pdev, INTEL_D1500_SMB_STAT, read_value);
         if (ret) {
@@ -84,6 +85,7 @@ static int intel_d1500_spd_set_page(int spd_page, struct pci_dev *pdev)
     }
 
     usleep_range(WAIT_TIME, WAIT_TIME + 1);
+    read_value = 0;
     ret = intel_d1500_spd_rdata_valid(pdev, &read_value);
     if (ret) {
         DEBUG_ERROR("intel_d1500_spd_set_page wait rdata valid fail, ret %d.\n", ret);
@@ -122,6 +124,7 @@ static int intel_d1500_smb_read_dword(struct pci_dev *pdev, int type, int reg_of
         return ret;
     }
 
+    read_value = 0;
     ret = pci_read_config_dword(pdev, INTEL_D1500_SMB_CNTL, &read_value);
     if (ret) {
         DEBUG_ERROR("intel_d1500_smb_read_dword pci_read_config_dword failed, reg: 0x%x ret %d.\n", INTEL_D1500_SMB_CNTL, ret);
@@ -167,6 +170,7 @@ static void intel_d1700_do_tsod_en(struct pci_dev *pdev)
     u32 read_value;
     int ret;
 
+    read_value = 0;
     ret = pci_read_config_dword(pdev, INTEL_D1700_SMB_CMD_CFG, &read_value);
     if (ret) {
         DEBUG_ERROR("intel_d1700_do_tsod_en pci_read_config_dword failed, reg: 0x%x ret %d.\n", INTEL_D1700_SMB_CMD_CFG, ret);
@@ -186,6 +190,7 @@ static int intel_d1700_spd_is_busy(struct pci_dev *pdev, u32 *read_value)
 {
     int timeout, ret;
 
+    timeout = 0;
     while (1) {
         ret = pci_read_config_dword(pdev, INTEL_D1700_SMB_STAT_CFG, read_value);
         if (ret) {
@@ -231,6 +236,7 @@ static int intel_d1700_spd_set_page(int spd_page, struct pci_dev *pdev)
     }
 
     usleep_range(WAIT_TIME, WAIT_TIME + 1);
+    read_value = 0;
     ret = intel_d1700_spd_is_busy(pdev, &read_value);
     if (ret) {
         DEBUG_ERROR("intel_d1700_spd_set_page wait spd busy fail, ret %d.\n", ret);
@@ -270,6 +276,7 @@ static int intel_d1700_smb_read_dword(struct pci_dev *pdev, int type, int reg_of
         goto do_tsod_en;
     }
 
+    read_value = 0;
     ret = pci_read_config_dword(pdev, INTEL_D1700_SMB_CMD_CFG, &read_value);
     if (ret) {
         DEBUG_ERROR("intel_d1700_smb_read_dword pci_read_config_dword failed, reg: 0x%x ret %d.\n", INTEL_D1700_SMB_CMD_CFG, ret);

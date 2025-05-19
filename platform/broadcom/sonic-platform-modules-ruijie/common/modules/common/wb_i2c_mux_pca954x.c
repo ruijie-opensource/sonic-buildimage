@@ -1210,7 +1210,7 @@ static int pca954x_probe(struct i2c_client *client,
         return PTR_ERR(gpio);
 
     /* check device connection status */
-
+    probe_hw_init = 0;
     if (client->dev.of_node == NULL) {
         if (client->dev.platform_data == NULL) {
             probe_disable = 1;

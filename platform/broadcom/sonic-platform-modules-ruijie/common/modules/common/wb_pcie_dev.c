@@ -697,11 +697,7 @@ static ssize_t info_show(struct kobject *kobj, struct kobj_attribute *attr, char
 {
     int offset;
     ssize_t buf_len;
-
     wb_pci_dev_t *pci_dev = container_of(kobj, wb_pci_dev_t, kobj);
-    if (!pci_dev) {
-        return -ENODEV;
-    }
 
     mem_clear(buf, PAGE_SIZE);
     offset = 0;
@@ -896,6 +892,7 @@ static ssize_t file_cache_wr_store(struct kobject *kobj, struct kobj_attribute *
         return -ENODEV;
     }
 
+    val = 0;
     ret = kstrtou8(buf, 0, &val);
     if (ret) {
         DEBUG_ERROR("Invaild input value [%s], errno: %d\n", buf, ret);
@@ -1235,11 +1232,13 @@ static int pci_dev_probe(struct platform_device *pdev)
             return -ENXIO;
         }
 
+        secbus_val = 0;
         ret = pci_read_config_byte(pci_bridge_dev, SECBUS, &secbus_val);
         if (ret) {
             dev_err(&pdev->dev, "Failed to get secbus value, ret: %d\n", ret);
             return -EIO;
         }
+        subbus_val = 0;
         ret = pci_read_config_byte(pci_bridge_dev, SUBBUS, &subbus_val);
         if (ret) {
             dev_err(&pdev->dev, "Failed to get subbus value, ret: %d\n", ret);

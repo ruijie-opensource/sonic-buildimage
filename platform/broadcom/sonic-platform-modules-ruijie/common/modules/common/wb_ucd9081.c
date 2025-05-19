@@ -133,13 +133,13 @@ static int ucd9081_get_vref(struct i2c_client *client)
     
     mutex_lock(&data->update_lock);
     /* 0.Backup original WADDR */
-    ori_addr = wb_i2c_smbus_read_word_data(client, WB_UCD9081_WADDR1);
-    if (ori_addr < 0) {
+    ret = wb_i2c_smbus_read_word_data(client, WB_UCD9081_WADDR1);
+    if (ret < 0) {
         DEBUG_ERROR("%d-%04x: read ucd9081 origin addr failed, ret: %d\n", client->adapter->nr,
-            client->addr, ori_addr);
-        ret = ori_addr;
+            client->addr, ret);
         goto error;
     }
+    ori_addr = ret;
     DEBUG_VERBOSE("%d-%04x: save ucd9081 waddr success, ori_addr: 0x%x\n",
             client->adapter->nr, client->addr, ori_addr);
 
@@ -216,16 +216,15 @@ static ssize_t ucd9081_voltage_show(struct device *dev, struct device_attribute 
     client = data->client;
     index = to_sensor_dev_attr_2(da)->index;
     channel = to_sensor_dev_attr_2(da)->nr;
-    ret = 0;
 
     mutex_lock(&data->update_lock);
-    value = wb_i2c_smbus_read_word_data(client, index);
-    if (value < 0) {
+    ret = wb_i2c_smbus_read_word_data(client, index);
+    if (ret < 0) {
         DEBUG_ERROR("%d-%04x: read ucd9081 channel%d voltage reg failed, reg: 0x%x ret: %d\n", client->adapter->nr,
             client->addr, channel, index, ret);
-        ret = value;
         goto error;
     }
+    value = ret;
     /* Terminal conversion */
     value = ((value & 0xff00) >> 8) | ((value & 0xff) << 8);
     DEBUG_VERBOSE("%d-%04x: read ucd9081 channel%d voltage success, reg: 0x%x, value: 0x%x\n",

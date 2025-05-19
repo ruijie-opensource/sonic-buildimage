@@ -90,7 +90,7 @@ static int wb_lpc_probe(struct platform_device *pdev)
         return -ENXIO;
     }
 
-    pci_write_config_dword(pci_dev, wb_lpc_dev->lpc_gen_dec, LPC_MAKE_PCI_IO_RANGE(wb_lpc_dev->lpc_io_base));
+    (void)pci_write_config_dword(pci_dev, wb_lpc_dev->lpc_gen_dec, LPC_MAKE_PCI_IO_RANGE(wb_lpc_dev->lpc_io_base));
     if (!request_region(wb_lpc_dev->lpc_io_base, wb_lpc_dev->lpc_io_size, wb_lpc_dev->lpc_io_name)) {
         dev_err(&pdev->dev, "Failed to request_region [0x%x][0x%x].\n", wb_lpc_dev->lpc_io_base, wb_lpc_dev->lpc_io_size);
         return -EBUSY;

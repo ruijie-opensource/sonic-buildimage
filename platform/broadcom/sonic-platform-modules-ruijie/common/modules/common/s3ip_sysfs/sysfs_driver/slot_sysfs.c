@@ -247,6 +247,7 @@ static ssize_t slot_led_status_store(struct switch_obj *obj, struct switch_attri
     check_p(g_slot_drv->set_slot_led_status);
 
     slot_index = obj->index;
+    led_status = 0;
     ret = kstrtoint(buf, 0, &led_status);
     if (ret != 0) {
         SLOT_ERR("invaild slot led status ret: %d, buf: %s.\n", ret, buf);
@@ -631,7 +632,7 @@ static ssize_t slot_curr_max_store(struct switch_obj *obj, struct switch_attribu
     p_obj = to_switch_obj(obj->kobj.parent);
     slot_index = p_obj->index;
     curr_index = obj->index;
-    return g_slot_drv->set_slot_curr_max(slot_index, curr_index, buf, count);
+    ret = g_slot_drv->set_slot_curr_max(slot_index, curr_index, buf, count);
     if (ret < 0) {
         SLOT_ERR("set slot%u curr%u max threshold failed, value: %s, count: %lu, ret: %d\n",
             slot_index, curr_index, buf, count, ret);
@@ -921,6 +922,7 @@ static ssize_t slot_power_ctrl_store(struct switch_obj *obj, struct switch_attri
     check_p(g_slot_drv->set_slot_power_ctrl_status);
 
     slot_index = obj->index;
+    power = 0;
     ret = kstrtoint(buf, 0, &power);
     if (ret != 0) {
         SLOT_ERR("invaild slot power status ret: %d, buf: %s.\n", ret, buf);

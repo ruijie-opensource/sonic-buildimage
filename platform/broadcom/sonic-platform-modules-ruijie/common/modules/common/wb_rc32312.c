@@ -158,6 +158,7 @@ static ssize_t set_rc32312_value(struct device *dev, struct device_attribute *da
     u8 val;
     int ret;
 
+    val = 0;
     ret = kstrtou8(buf, 0, &val);
     if (ret) {
         DEBUG_ERROR("Invaild input value [%s], errno: %d\n", buf, ret);
@@ -216,6 +217,7 @@ static ssize_t set_rc32312_out_ctrl_value(struct device *dev, struct device_attr
     u16 val;
     int ret;
 
+    val = 0;
     ret = kstrtou16(buf, 0, &val);
     if (ret) {
         dev_err(&client->dev, "Invaild input value [%s], errno: %d\n", buf, ret);

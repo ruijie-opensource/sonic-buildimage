@@ -276,6 +276,7 @@ static ssize_t s3ip_config_reload(struct switch_obj *obj, struct switch_attribut
     check_p(g_syseeprom_drv);
     check_p(g_syseeprom_drv->reload_s3ip_config);
 
+    value = 0;
     ret = kstrtoint(buf, 0, &value);
     if (ret != 0) {
         SWITCH_ERR("invaild s3ip_config_reload buf: %s\n", buf);

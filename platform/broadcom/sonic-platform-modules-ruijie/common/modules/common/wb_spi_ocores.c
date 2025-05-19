@@ -735,7 +735,6 @@ static int ocores_spi_config_init(struct spioc *spioc)
         ret = of_property_read_u32(dev->of_node, "irq_flag", &spioc->irq_flag);
         if (ret != 0) {
             spioc->irq_flag = 0;
-            ret = 0;
         }
     } else {
         if (spioc->dev->platform_data == NULL) {

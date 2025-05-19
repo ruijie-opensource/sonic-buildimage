@@ -52,6 +52,7 @@ static ssize_t sys_led_status_store(struct switch_obj *obj, struct switch_attrib
     check_p(g_sysled_drv);
     check_p(g_sysled_drv->set_sys_led_status);
 
+    value = 0;
     ret = kstrtoint(buf, 0, &value);
     if (ret != 0) {
         SYSLED_ERR("invaild led status ret: %d, can't set sys led status\n", ret);
@@ -83,6 +84,7 @@ static ssize_t bmc_led_status_store(struct switch_obj *obj, struct switch_attrib
     check_p(g_sysled_drv);
     check_p(g_sysled_drv->set_bmc_led_status);
 
+    value = 0;
     ret = kstrtoint(buf, 0, &value);
     if (ret != 0) {
         SYSLED_ERR("invaild led status ret: %d, can't set bmc led status\n", ret);
@@ -114,6 +116,7 @@ static ssize_t sys_fan_led_status_store(struct switch_obj *obj, struct switch_at
     check_p(g_sysled_drv);
     check_p(g_sysled_drv->set_sys_fan_led_status);
 
+    value = 0;
     ret = kstrtoint(buf, 0, &value);
     if (ret != 0) {
         SYSLED_ERR("invaild led status ret: %d, can't set sys fan led status\n", ret);
@@ -145,6 +148,7 @@ static ssize_t sys_psu_led_status_store(struct switch_obj *obj, struct switch_at
     check_p(g_sysled_drv);
     check_p(g_sysled_drv->set_sys_psu_led_status);
 
+    value = 0;
     ret = kstrtoint(buf, 0, &value);
     if (ret != 0) {
         SYSLED_ERR("invaild led status ret: %d, can't set sys psu led status\n", ret);
@@ -176,6 +180,7 @@ static ssize_t id_led_status_store(struct switch_obj *obj, struct switch_attribu
     check_p(g_sysled_drv);
     check_p(g_sysled_drv->set_id_led_status);
 
+    value = 0;
     ret = kstrtoint(buf, 0, &value);
     if (ret != 0) {
         SYSLED_ERR("invaild led status ret: %d, can't set id led status\n", ret);

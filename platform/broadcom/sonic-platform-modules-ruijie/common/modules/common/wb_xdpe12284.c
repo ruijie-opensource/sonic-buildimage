@@ -266,6 +266,7 @@ static ssize_t xdpe122_avs_vout_store(struct device *dev, struct device_attribut
         return -EINVAL;
     }
 
+    vout = 0;
     ret = kstrtoint(buf, 0, &vout);
     if (ret) {
         DEBUG_ERROR("%d-%04x: invalid value: %s \n", client->adapter->nr, client->addr, buf);

@@ -1010,6 +1010,7 @@ static ssize_t file_cache_rd_store(struct kobject *kobj, struct kobj_attribute *
         return -ENODEV;
     }
 
+    val = 0;
     ret = kstrtou8(buf, 0, &val);
     if (ret) {
         DEBUG_ERROR("Invaild input value [%s], errno: %d\n", buf, ret);

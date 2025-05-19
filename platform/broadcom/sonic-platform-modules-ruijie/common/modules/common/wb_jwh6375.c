@@ -178,6 +178,7 @@ static ssize_t jwh63_avs_vout_store(struct device *dev, struct device_attribute 
         return -EINVAL;
     }
 
+    vout = 0;
     ret = kstrtoint(buf, 0, &vout);
     if (ret) {
         DEBUG_ERROR("%d-%04x: invalid value: %s \n", client->adapter->nr, client->addr, buf);
@@ -260,6 +261,7 @@ static ssize_t jwh63_avs_vout_max_store(struct device *dev, struct device_attrib
         return -EINVAL;
     }
 
+    vout_threshold = 0;
     ret = kstrtoint(buf, 0, &vout_threshold);
     if (ret) {
         DEBUG_ERROR("%d-%04x: invalid value: %s \n", client->adapter->nr, client->addr, buf);
@@ -303,6 +305,7 @@ static ssize_t jwh63_avs_vout_min_store(struct device *dev, struct device_attrib
         return -EINVAL;
     }
 
+    vout_threshold = 0;
     ret = kstrtoint(buf, 0, &vout_threshold);
     if (ret) {
         DEBUG_ERROR("%d-%04x: invalid value: %s \n", client->adapter->nr, client->addr, buf);

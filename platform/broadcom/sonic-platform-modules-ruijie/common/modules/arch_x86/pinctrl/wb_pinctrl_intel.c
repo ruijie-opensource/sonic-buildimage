@@ -327,14 +327,22 @@ static void intel_pin_dbg_show(struct pinctrl_dev *pctldev, struct seq_file *s,
 	u32 cfg0, cfg1, mode;
 	int locked;
 	bool acpi;
+	void __iomem *padcfg0, *padcfg1;
+
 
 	if (!intel_pad_owned_by_host(pctrl, pin)) {
 		seq_puts(s, "not available");
 		return;
 	}
 
-	cfg0 = readl(intel_get_padcfg(pctrl, pin, PADCFG0));
-	cfg1 = readl(intel_get_padcfg(pctrl, pin, PADCFG1));
+    padcfg0 = intel_get_padcfg(pctrl, pin, PADCFG0);
+    padcfg1 = intel_get_padcfg(pctrl, pin, PADCFG1);
+    if (padcfg0 == NULL || padcfg1 == NULL) {
+        return;
+    }
+
+	cfg0 = readl(padcfg0);
+	cfg1 = readl(padcfg1);
 
 	mode = (cfg0 & PADCFG0_PMODE_MASK) >> PADCFG0_PMODE_SHIFT;
 	if (mode == PADCFG0_PMODE_GPIO)
@@ -431,6 +439,10 @@ static int intel_pinmux_set_mux(struct pinctrl_dev *pctldev,
 		u32 value;
 
 		padcfg0 = intel_get_padcfg(pctrl, grp->pins[i], PADCFG0);
+        if (padcfg0 == NULL) {
+            raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+            return -EPERM;
+        }
 		value = readl(padcfg0);
 
 		value &= ~PADCFG0_PMODE_MASK;
@@ -541,6 +553,9 @@ static int intel_gpio_set_direction(struct pinctrl_dev *pctldev,
 	unsigned long flags;
 
 	padcfg0 = intel_get_padcfg(pctrl, pin, PADCFG0);
+    if (padcfg0 == NULL) {
+        return -EINVAL;
+    }
 
 	raw_spin_lock_irqsave(&pctrl->lock, flags);
 	__intel_gpio_set_direction(padcfg0, input);
@@ -568,6 +583,9 @@ static int intel_config_get_pull(struct intel_pinctrl *pctrl, unsigned int pin,
 
 	community = intel_get_community(pctrl, pin);
 	padcfg1 = intel_get_padcfg(pctrl, pin, PADCFG1);
+	if (community == NULL || padcfg1 == NULL) {
+		return -EINVAL;
+	}
 
 	raw_spin_lock_irqsave(&pctrl->lock, flags);
 	value = readl(padcfg1);
@@ -705,6 +723,9 @@ static int intel_config_set_pull(struct intel_pinctrl *pctrl, unsigned int pin,
 
 	community = intel_get_community(pctrl, pin);
 	padcfg1 = intel_get_padcfg(pctrl, pin, PADCFG1);
+    if (community == NULL || padcfg1 == NULL) {
+        return -EINVAL;
+    }
 
 	raw_spin_lock_irqsave(&pctrl->lock, flags);
 
@@ -789,7 +810,8 @@ static int intel_config_set_pull(struct intel_pinctrl *pctrl, unsigned int pin,
 static int intel_config_set_debounce(struct intel_pinctrl *pctrl,
 				     unsigned int pin, unsigned int debounce)
 {
-	void __iomem *padcfg0, *padcfg2;
+	void __iomem *padcfg0;
+    void __iomem *padcfg2;
 	unsigned long flags;
 	u32 value0, value2;
 
@@ -798,6 +820,8 @@ static int intel_config_set_debounce(struct intel_pinctrl *pctrl,
 		return -ENOTSUPP;
 
 	padcfg0 = intel_get_padcfg(pctrl, pin, PADCFG0);
+	if (!padcfg0)
+		return -ENOTSUPP;
 
 	raw_spin_lock_irqsave(&pctrl->lock, flags);
 
@@ -1509,7 +1533,7 @@ int wb_pinctrl_probe(struct platform_device *pdev,
 	pctrl->communities = devm_kcalloc(&pdev->dev, pctrl->ncommunities,
 				  sizeof(*pctrl->communities), GFP_KERNEL);
 	if (!pctrl->communities) {
-        dev_err(&pdev->dev, "devm_kcalloc communities failed. ret:%d\n", ret);
+        dev_err(&pdev->dev, "devm_kcalloc communities failed\n");
         return -ENOMEM;
     }
 
@@ -1662,14 +1686,22 @@ int wb_intel_pinctrl_suspend_noirq(struct device *dev)
 	for (i = 0; i < pctrl->soc->npins; i++) {
 		const struct pinctrl_pin_desc *desc = &pctrl->soc->pins[i];
 		void __iomem *padcfg;
+        void __iomem *padcfg0;
+        void __iomem *padcfg1;
 		u32 val;
 
 		if (!intel_pinctrl_should_save(pctrl, desc->number))
 			continue;
 
-		val = readl(intel_get_padcfg(pctrl, desc->number, PADCFG0));
+        padcfg0 = intel_get_padcfg(pctrl, desc->number, PADCFG0);
+        padcfg1 = intel_get_padcfg(pctrl, desc->number, PADCFG1);
+        if (padcfg0 == NULL || padcfg1 == NULL) {
+            return -EPERM;
+        }
+
+		val = readl(padcfg0);
 		pads[i].padcfg0 = val & ~PADCFG0_GPIORXSTATE;
-		val = readl(intel_get_padcfg(pctrl, desc->number, PADCFG1));
+		val = readl(padcfg1);
 		pads[i].padcfg1 = val;
 
 		padcfg = intel_get_padcfg(pctrl, desc->number, PADCFG2);

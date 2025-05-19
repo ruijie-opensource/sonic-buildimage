@@ -150,6 +150,7 @@ static int wb_wdt_enable_ctrl(wb_wdt_priv_t *priv, uint8_t flag)
     }
 
     /* If wdt is enabled, read before write does not change the value of other bits */
+    val = 0;
     ret = wb_wdt_read(priv, priv->config_dev_name,
                 priv->enable_reg, PARENT_WDT, &val, ONE_BYTE);
     if (ret < 0) {
@@ -615,6 +616,7 @@ static unsigned int wb_wdt_get_timeleft(struct watchdog_device *wdd)
 
     accuracy = priv->timer_accuracy;
 
+    get_time_val = 0;
     ret = wb_wdt_read(priv, priv->config_dev_name,
                 priv->timeleft_cfg_reg, PARENT_WDT, &get_time_val, ONE_BYTE);
     if (ret < 0) {
@@ -932,6 +934,7 @@ static ssize_t wb_set_no_feed_dog_flag(struct device *dev, struct device_attribu
     }
 
     DEBUG_VERBOSE("current no_feed_dog_flag: 0x%x\n", priv->no_feed_dog_flag);
+    input_data = 0;
     ret = kstrtol(buf, 0, &input_data);
     if (ret) {
         dev_warn(dev, "input value fail.\n");
@@ -972,6 +975,7 @@ static ssize_t wb_set_wdt_timeout_value(struct device *dev, struct device_attrib
 
     DEBUG_VERBOSE("old set timeout vlaue: %ds\n", priv->set_timeout_value / MS_TO_S);
 
+    input_data = 0;
     ret = kstrtol(buf, 0, &input_data);
     if (ret) {
         dev_warn(dev, "input value fail.\n");
@@ -1028,7 +1032,8 @@ static int wb_wdt_probe(struct platform_device *pdev)
     }
 
     platform_set_drvdata(pdev, priv);
-
+    wb_wdt_device = NULL;
+    algo = "";
     if (pdev->dev.of_node) {
         ret = 0;
         ret += of_property_read_string(pdev->dev.of_node, "config_dev_name", &priv->config_dev_name);

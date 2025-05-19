@@ -534,6 +534,7 @@ static ssize_t sysfs_set_psu_time(struct device *dev, struct device_attribute *d
     unsigned long val;
     int ret;
 
+    val = 0;
     ret = kstrtoul(buf, 0, &val);
     if (ret) {
         dev_info(&client->dev, "kstrtoul failed, err = %d\n", ret);
@@ -630,6 +631,7 @@ static int get_psu_blackbox_type1_info(struct pmbus_data *data, struct i2c_clien
                 (blackbox.event[index].real_time_clock_data_from_system[1] << 8) |
                 (blackbox.event[index].real_time_clock_data_from_system[0]));
         offset += scnprintf(buf + offset, buf_len - offset, "%-23s: 0x%X\n", "REAL_TIME_TIMESTAMP", timestamp);
+        mem_clear(&tm, sizeof(tm));
         time64_to_tm(timestamp, 0, &tm);
         offset += scnprintf(buf + offset, buf_len - offset, "%-23s: %ld-%02d-%02d %02d:%02d:%02d\n",
             "REAL_TIME_CLOCK", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
@@ -968,6 +970,7 @@ static ssize_t psu_reset_store(struct device *dev, struct device_attribute *da, 
     data = i2c_get_clientdata(client);
     attr = to_sensor_dev_attr(da);
 
+    val = 0;
     ret = kstrtoint(buf, 0, &val);
     if (ret) {
         dev_err(&client->dev,"Invalid val: %s, kstrtoint failed, ret: %d\n", buf, ret);
@@ -1065,6 +1068,7 @@ static ssize_t clear_blackbox_store(struct device *dev, struct device_attribute 
     struct pmbus_data *data;
     csu550_info_t *csu550_info = to_csu550_data(wb_pmbus_get_driver_info(client));
 
+    val = 0;
     ret = kstrtoint(buf, 0, &val);
     if (ret) {
         dev_err(&client->dev,"Invalid val: %s, kstrtoint failed, ret: %d\n", buf, ret);
@@ -1413,7 +1417,7 @@ static int pmbus_identify(struct i2c_client *client,
                 if (wb_pmbus_set_page(client, page, 0xff) < 0)
                     break;
             }
-            wb_pmbus_set_page(client, 0, 0xff);
+            (void)wb_pmbus_set_page(client, 0, 0xff);
             info->pages = page;
         } else {
             info->pages = 1;
@@ -1486,7 +1490,7 @@ static int create_psu_procfs(struct i2c_client *client, csu550_info_t *csu550_in
         psu_attr_proc_ent = proc_create_data(psu_procfs_attrs[attr_index].name, psu_procfs_attrs[attr_index].mode,
             csu550_info->psu_client_proc_ent, psu_procfs_attrs[attr_index].proc_op, client);
         if (!psu_attr_proc_ent) {
-            dev_err(&client->dev, "Failed to create %s procfs\n", psu_procfs_attrs[i].name);
+            dev_err(&client->dev, "Failed to create %s procfs\n", psu_procfs_attrs[attr_index].name);
             goto err;
         }
         DEBUG_VERBOSE("%d-%04x: Create %s procfs successfully\n",

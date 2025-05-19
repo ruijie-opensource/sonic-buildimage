@@ -1411,6 +1411,7 @@ static ssize_t dfd_get_psu_status(unsigned int psu_index, char *buf, size_t coun
         return (ssize_t)snprintf(buf, count, "0x%x\n", status);
     }
 
+    status_word = 0;
     ret = dfd_get_psu_pmbus_status(psu_index, &status_word);
     if (ret < 0) {
         SWITCH_DEBUG(DBG_ERROR, "get psu pmbus status error, ret: %ld, psu_index: %u\n", ret, psu_index);
@@ -2036,6 +2037,7 @@ static ssize_t dfd_get_psu_led_status(unsigned int psu_index, char *buf, size_t 
     }
     status = LED_STATUS_GREEN;
 
+    status_word = 0;
     ret = dfd_get_psu_pmbus_status(psu_index, &status_word);
     if (ret < 0) {
         SWITCH_DEBUG(DBG_ERROR, "get psu pmbus status error, ret: %ld, psu_index: %u\n", ret, psu_index);

@@ -1304,6 +1304,7 @@ static acpi_status check_acpi_smo88xx_device(acpi_handle obj_handle,
 	char *hid;
 	int i;
 
+    info = NULL;
 	status = acpi_get_object_info(obj_handle, &info);
 	if (ACPI_FAILURE(status))
 		return AE_OK;
@@ -1646,10 +1647,12 @@ i801_add_tco_spt(struct i801_priv *priv, struct pci_dev *pci_dev,
 	devfn = PCI_DEVFN(PCI_SLOT(pci_dev->devfn), 1);
 
 	/* Unhide the P2SB device, if it is hidden */
+    hidden = 0;
 	pci_bus_read_config_byte(pci_dev->bus, devfn, 0xe1, &hidden);
 	if (hidden)
 		pci_bus_write_config_byte(pci_dev->bus, devfn, 0xe1, 0x0);
 
+    base_addr = 0;
 	pci_bus_read_config_dword(pci_dev->bus, devfn, SBREG_BAR, &base_addr);
 	base64_addr = base_addr & 0xfffffff0;
 

@@ -127,6 +127,7 @@ static ssize_t watchdog_reset_store(struct switch_obj *obj, struct switch_attrib
     check_p(g_wdt_drv);
     check_p(g_wdt_drv->set_watchdog_reset);
 
+    value = 0;
     ret = kstrtoint(buf, 0, &value);
     if (ret) {
         WDT_ERR("invalid value: %s \n", buf);

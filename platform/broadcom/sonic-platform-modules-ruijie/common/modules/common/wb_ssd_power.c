@@ -66,6 +66,7 @@ static int wb_ssd_power_ctrl(ssd_power_node_t *node, int on)
     int ret;
 
     /* read origin register value */
+    power_ops = 0;
     ret = wb_logic_reg_read(node, node->addr, &power_ops, 1);
     if (ret < 0) {
         DEBUG_ERROR("read %s, addr: 0x%x failed, ret: %d\n", node->file_name,
@@ -184,7 +185,6 @@ static int wb_ssd_power_config_init(ssd_power_node_t *node)
         node->power_off_delay = ssd_power_device->power_off_delay;
         node->file_name = ssd_power_device->file_name;
         node->reg_access_mode = ssd_power_device->reg_access_mode;
-        ret = 0;
     }
 
     ret = find_intf_addr(&node->write_intf_addr, &node->read_intf_addr, node->reg_access_mode);

@@ -65,6 +65,7 @@ static ssize_t set_xdpe132g5c_avs(struct device *dev, struct device_attribute *d
     struct pmbus_data *data;
 
     data = i2c_get_clientdata(client);
+    val = 0;
     ret = kstrtoul(buf, 0, &val);
     if (ret){
         return ret;
@@ -181,6 +182,7 @@ static ssize_t xdpe132g5_avs_vout_store(struct device *dev, struct device_attrib
         return -EINVAL;
     }
 
+    vout = 0;
     ret = kstrtos64(buf, 0, &vout);
     if (ret) {
         DEBUG_ERROR("%d-%04x: invalid value: %s \n", client->adapter->nr, client->addr, buf);

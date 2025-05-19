@@ -406,6 +406,7 @@ static ssize_t psu_fan_ratio_store(struct switch_obj *obj, struct switch_attribu
     check_p(g_psu_drv->set_psu_fan_ratio);
 
     psu_index = obj->index;
+    ratio = 0;
     ret = kstrtoint(buf, 0, &ratio);
     if (ret != 0) {
         PSU_ERR("invaild psu fan ratio ret: %d, buf: %s.\n", ret, buf);
@@ -649,23 +650,24 @@ static ssize_t psu_clear_blackbox_store(struct switch_obj *obj, struct switch_at
 {
     unsigned int psu_index;
     int ret;
-    uint8_t vaule;
+    uint8_t value;
 
     check_p(g_psu_drv);
     check_p(g_psu_drv->clear_psu_blackbox);
 
     psu_index = obj->index;
-    ret = kstrtou8(buf, 0, &vaule);
+    value = 0;
+    ret = kstrtou8(buf, 0, &value);
     if (ret != 0) {
         PSU_ERR("Invaild value ret: %d, buf: %s.\n", ret, buf);
         return -EINVAL;
     }
-    if (vaule != 1) {
-        PSU_ERR("Invaild value: %u, only support write 1 to clear psu blackbox information\n", vaule);
+    if (value != 1) {
+        PSU_ERR("Invaild value: %u, only support write 1 to clear psu blackbox information\n", value);
         return -EINVAL;
     }
     PSU_DBG("psu index: %u, clear psu blackbox information\n", psu_index);
-    ret = g_psu_drv->clear_psu_blackbox(psu_index, vaule);
+    ret = g_psu_drv->clear_psu_blackbox(psu_index, value);
     if (ret < 0) {
         PSU_ERR("clear psu%u blackbox information failed, ret: %d\n",
             psu_index, ret);

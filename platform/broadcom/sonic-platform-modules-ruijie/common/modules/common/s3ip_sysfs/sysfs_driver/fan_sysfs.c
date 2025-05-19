@@ -214,6 +214,7 @@ static ssize_t fan_led_status_store(struct switch_obj *obj, struct switch_attrib
     check_p(g_fan_drv->set_fan_led_status);
 
     fan_index = obj->index;
+    led_status = 0;
     ret = kstrtoint(buf, 0, &led_status);
     if (ret != 0) {
         FAN_ERR("invaild fan led status ret: %d, buf: %s.\n", ret, buf);
@@ -348,6 +349,7 @@ static ssize_t fan_ratio_store(struct switch_obj *obj, struct switch_attribute *
 
     fan_index = obj->index;
 
+    ratio = 0;
     ret = kstrtoint(buf, 0, &ratio);
     if (ret != 0) {
         FAN_ERR("invaild fan ratio ret: %d, buf: %s.\n", ret, buf);

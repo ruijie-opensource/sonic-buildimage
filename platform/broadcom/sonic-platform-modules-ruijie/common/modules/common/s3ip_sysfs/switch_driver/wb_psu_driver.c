@@ -303,6 +303,7 @@ ssize_t dfd_get_psu_hw_status_str(unsigned int psu_index, char *buf, size_t coun
     /* if cpld status not ok */
     if (alert_status || !output_status) {
     /* jduge psu status from psu pmbus 0x79 */
+        status_word = 0;
         ret = dfd_get_psu_pmbus_status(psu_index, &status_word);
         if (ret < 0) {
             DFD_PSU_DEBUG(DBG_ERROR, "get psu pmbus status error, ret: %d, psu_index: %u\n", ret, psu_index);
@@ -340,6 +341,7 @@ ssize_t dfd_get_psu_status_pmbus_str(unsigned int psu_index, char *buf, size_t c
     }
 
     /* Gets the status from the pmbus register of the power supply */
+    pmbus_data = 0;
     ret = dfd_get_psu_pmbus_status(psu_index, &pmbus_data);
     if (ret < 0) {
         DFD_PSU_DEBUG(DBG_ERROR, "get psu%u pmbus status failed,  ret: %d\n", psu_index, ret);
@@ -398,6 +400,7 @@ ssize_t dfd_get_psu_out_status_str(unsigned int psu_index, char *buf, size_t cou
     }
 
     /* Gets the status from the pmbus register of the power supply */
+    pmbus_data = 0;
     ret = dfd_get_psu_pmbus_status(psu_index, &pmbus_data);
     if (ret < 0) {
         DFD_PSU_DEBUG(DBG_ERROR, "get psu%u pmbus status failed, ret: %d\n", psu_index, ret);
@@ -734,6 +737,7 @@ ssize_t dfd_get_psu_in_status_str(unsigned int psu_index, char *buf, size_t coun
         return -EINVAL;
     }
 
+    pmbus_data = 0;
     ret = dfd_get_psu_pmbus_status(psu_index, &pmbus_data);
     if (ret < 0) {
         DFD_PSU_DEBUG(DBG_ERROR, "get psu%u pmbus status failed, ret: %d\n", psu_index, ret);
@@ -768,6 +772,7 @@ ssize_t dfd_get_psu_alarm_status(unsigned int psu_index, char *buf, size_t count
     }
 
     /* PMBUS STATUS WORD (0x79) */
+    pmbus_data = 0;
     ret = dfd_get_psu_pmbus_status(psu_index, &pmbus_data);
     if (ret < 0) {
         DFD_PSU_DEBUG(DBG_ERROR, "get psu%u pmbus status failed, ret: %d\n", psu_index, ret);

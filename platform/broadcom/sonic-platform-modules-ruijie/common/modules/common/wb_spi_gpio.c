@@ -384,6 +384,7 @@ static int spi_gpio_probe_dt(struct platform_device *pdev)
 	if (!pdata)
 		return -ENOMEM;
 
+    tmp = 0;
 	ret = of_property_read_u32(np, "num-chipselects", &tmp);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "num-chipselects property not found\n");

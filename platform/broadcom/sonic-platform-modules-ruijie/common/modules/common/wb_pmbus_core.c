@@ -125,6 +125,7 @@ ssize_t pmbus_avs_vout_max_store(struct device *dev,
         return -EINVAL;
     }
 
+    vout_threshold = 0;
     ret = kstrtoint(buf, 0, &vout_threshold);
     if (ret) {
         dev_dbg(dev, "Invalid value: %s\n", buf);
@@ -167,6 +168,7 @@ ssize_t pmbus_avs_vout_min_store(struct device *dev,
         return -EINVAL;
     }
 
+    vout_threshold = 0;
     ret = kstrtoint(buf, 0, &vout_threshold);
     if (ret) {
         dev_dbg(dev, "Invalid value: %s\n", buf);
@@ -1300,6 +1302,7 @@ static ssize_t pmbus_set_sensor(struct device *dev,
     int ret;
     u16 regval;
 
+    val = 0;
     if (kstrtos64(buf, 10, &val) < 0)
         return -EINVAL;
 
@@ -2424,6 +2427,7 @@ static ssize_t pmbus_set_samples(struct device *dev,
     struct pmbus_samples_reg *reg = to_samples_reg(devattr);
     struct pmbus_data *data = i2c_get_clientdata(client);
 
+    val = 0;
     if (kstrtol(buf, 0, &val) < 0)
         return -EINVAL;
 
@@ -2662,11 +2666,11 @@ static int buf_to_data(int data_type, u8 *data_buf, int data_len, u64 *val)
     val_tmp = 0;
     if (data_type == LE_DATA) {
         for (i = 0; i < data_len; i++) {
-            val_tmp |= (data_buf[i] << (i * 8));
+            val_tmp |= ((u64)data_buf[i] << (i * 8));
         }
     } else {
         for (i = 0; i < data_len; i++) {
-            val_tmp |= data_buf[i] << (8 * (data_len -i - 1));
+            val_tmp |= (u64)data_buf[i] << (8 * (data_len -i - 1));
         }
 
     }
@@ -3099,6 +3103,8 @@ static int pmbus_init_avs_threshold(struct i2c_client *client)
         snprintf(avs_max_name, sizeof(avs_max_name), "avs%d_vout_max", i);
         snprintf(avs_min_name, sizeof(avs_min_name), "avs%d_vout_min", i);
         ret = 0;
+        vout_min = 0;
+        vout_max = 0;
         ret += of_property_read_u32(of_node, avs_max_name, &vout_max);
         ret += of_property_read_u32(of_node, avs_min_name, &vout_min);
         if (ret == 0) {

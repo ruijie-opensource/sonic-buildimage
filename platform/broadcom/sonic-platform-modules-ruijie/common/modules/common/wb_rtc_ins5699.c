@@ -46,6 +46,8 @@
 #include <linux/input.h>
 #include <linux/delay.h>
 
+#define mem_clear(data, size) memset((data), 0, (size))
+
 //#define  CHARGEBAT
 
 // INS5699 Basic Time and Calendar Register definitions
@@ -281,7 +283,7 @@ static void ins5699_work(struct work_struct *work)
 	}
 
 	// acknowledge IRQ
-	ins5699_write_reg(client, INS5699_BTC_FLAG, 0x0f & flags);
+	(void)ins5699_write_reg(client, INS5699_BTC_FLAG, 0x0f & flags);
 
 out:
 	if (!ins5699->exiting)
@@ -318,6 +320,7 @@ static int ins5699_get_time(struct device *dev, struct rtc_time *dt)
 	u8 date[7];
 	int err;
 
+    mem_clear(date, sizeof(date));
 	err = ins5699_read_regs(ins5699->client, INS5699_BTC_SEC, 7, date);
 	if (err)
 		return err;
@@ -567,18 +570,20 @@ static int ins5699_get_alarm(struct device *dev, struct rtc_wkalrm *t)
 	struct ins5699_data *ins5699 = dev_get_drvdata(dev);
 	struct i2c_client *client = ins5699->client;
 	u8 alarmvals[3];		//minute, hour, week/day values
-	u8 ctrl[2];				//extension, flag
+	u8 ctrl[3];				//extension, flag
 	int err;
 
 	if (client->irq <= 0)
 		return -EINVAL;
 
 	//get current minute, hour, week/day alarm values
+	mem_clear(alarmvals, sizeof(alarmvals));
 	err = ins5699_read_regs(client, INS5699_BTC_ALARM_MIN, 3, alarmvals);
 	if (err)
 		return err;
 
 	//get current extension, flag, control values
+	mem_clear(ctrl, sizeof(ctrl));
 	err = ins5699_read_regs(client, INS5699_BTC_EXT, 3, ctrl);
 	if (err)
 		return err;
@@ -644,6 +649,7 @@ static int ins5699_set_alarm(struct device *dev, struct rtc_wkalrm *t)
 		t->time.tm_mday, t->time.tm_mon, t->time.tm_year);
 
 	//get current flag register
+	mem_clear(ctrl, sizeof(ctrl));
 	err = ins5699_read_regs(client, INS5699_BTC_FLAG, 2, ctrl);
 	if (err <0)
 		return err;

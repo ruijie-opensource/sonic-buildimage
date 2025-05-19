@@ -312,6 +312,7 @@ static void of_i2c_gpio_get_props(struct device_node *np,
 
 	of_property_read_u32(np, "i2c-gpio,delay-us", &pdata->udelay);
 
+	reg = 0;
 	if (!of_property_read_u32(np, "i2c-gpio,timeout-ms", &reg))
 		pdata->timeout = msecs_to_jiffies(reg);
 

@@ -123,6 +123,7 @@ static ssize_t eth_optoe_type_store(struct switch_obj *obj, struct switch_attrib
     check_p(g_sff_drv);
     check_p(g_sff_drv->set_eth_optoe_type);
 
+    optoe_type = 0;
     ret = kstrtoint(buf, 0, &optoe_type);
     if (ret != 0) {
         SFF_ERR("invaild optoe_type ret: %d, buf: %s.\n", ret, buf);

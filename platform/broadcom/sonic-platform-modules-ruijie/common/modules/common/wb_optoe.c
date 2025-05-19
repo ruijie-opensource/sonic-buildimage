@@ -862,7 +862,7 @@ static ssize_t set_dev_class(struct device *dev,
 	 * And...  CMIS spec is 1 i2c address, but puts the pageable
 	 * bit in a different location, so CMIS devices are "3"
 	 */
-
+    dev_class = 0;
 	if (kstrtoint(buf, 0, &dev_class) != 0 ||
 		dev_class < 1 || dev_class > 3)
 		return -EINVAL;

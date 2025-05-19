@@ -130,6 +130,7 @@ static int dfd_irq_probe(struct platform_device *pdev)
     dfd_irq_info->name = "uio-irq";
 
     if (pdev->dev.of_node) {
+        irq_info_mode = 0;
         ret = of_property_read_u32(pdev->dev.of_node, "irq_info_mode", &irq_info_mode);
         if (ret) {
             DEBUG_VERBOSE("irq_info_mode not found, default: MODE_PIRQ_LINE");

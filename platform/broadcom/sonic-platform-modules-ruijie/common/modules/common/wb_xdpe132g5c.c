@@ -338,6 +338,7 @@ static ssize_t xdpe_avs_vout_store(struct device *dev, struct device_attribute *
     long vout, vout_max, vout_min;
 
     client = to_i2c_client(dev);
+    vout = 0;
     ret = kstrtol(buf, 0, &vout);
     if (ret) {
         DEBUG_ERROR("%d-%04x: invalid value: %s \n", client->adapter->nr, client->addr, buf);
@@ -443,6 +444,7 @@ static ssize_t xdpe_avs_vout_max_store(struct device *dev, struct device_attribu
     long vout_max;
 
     client = to_i2c_client(dev);
+    vout_max = 0;
     ret = kstrtol(buf, 10, &vout_max);
     if (ret) {
         DEBUG_ERROR("%d-%04x: invalid value: %s \n", client->adapter->nr, client->addr, buf);
@@ -476,6 +478,7 @@ static ssize_t xdpe_avs_vout_min_store(struct device *dev, struct device_attribu
     long vout_min;
 
     client = to_i2c_client(dev);
+    vout_min = 0;
     ret = kstrtol(buf, 10, &vout_min);
     if (ret) {
         DEBUG_ERROR("%d-%04x: invalid value: %s \n", client->adapter->nr, client->addr, buf);

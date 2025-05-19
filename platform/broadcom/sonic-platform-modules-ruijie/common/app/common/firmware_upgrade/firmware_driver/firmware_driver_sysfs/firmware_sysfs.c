@@ -145,6 +145,7 @@ static int of_firmware_upgrade_config_init(struct device *dev, firmware_sysfs_t 
     }
 
     mem_clear(sysfs_info, sizeof(firmware_sysfs_t));
+    name = NULL;
     ret = 0;
     ret += of_property_read_string(dev->of_node, "type", (const char **)&name);
 
@@ -156,12 +157,14 @@ static int of_firmware_upgrade_config_init(struct device *dev, firmware_sysfs_t 
     }
     strncpy(sysfs_info->type, name, sizeof(sysfs_info->type) - 1);
 
+    test_base = 0;
     ret = of_property_read_u32(dev->of_node, "test_base", &test_base);
     if (ret != 0) {
         FIRMWARE_DRIVER_DEBUG_ERROR("dts config test_base, ret:%d.\n", ret);
         test_base = 0;
     }
 
+    test_size = 0;
     ret = of_property_read_u32(dev->of_node, "test_size", &test_size);
     if (ret != 0) {
         FIRMWARE_DRIVER_DEBUG_ERROR("dts config test_size, ret:%d.\n", ret);

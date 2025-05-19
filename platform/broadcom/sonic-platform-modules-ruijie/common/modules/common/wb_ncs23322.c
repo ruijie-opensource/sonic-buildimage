@@ -64,19 +64,23 @@ static int ncs23322_set_page(struct i2c_client *client, int page)
     return 0;
 }
 
-static u8 ncs23322_read_bit_data(struct i2c_client *client, int page, u8 reg, int bit)
+static s32 ncs23322_read_bit_data(struct i2c_client *client, int page, u8 reg, int bit)
 {
     int rv;
-    u8 value;
 
     rv = ncs23322_set_page(client, page);
     if (rv < 0) {
-        DEBUG_ERROR("ncs23322 read word setting page failed errno: %d\n", rv);
+        DEBUG_ERROR("ncs23322 read bit data set page%d failed, rv: %d\n", page, rv);
         return rv;
     }
 
-    value = i2c_smbus_read_byte_data(client, reg);
-    return ((value >> bit) & 0x1);
+    rv = i2c_smbus_read_byte_data(client, reg);
+    if (rv < 0) {
+        DEBUG_ERROR("ncs23322 read bit data read byte data failed, reg:0x%x, rv: %d\n", reg, rv);
+        return rv;
+    }
+
+    return ((rv >> bit) & 0x1);
 }
 
 #if 0
@@ -217,6 +221,7 @@ static ssize_t ncs23322_general_word_store(struct device *dev, struct device_att
     u16 val;
     int ret;
 
+    val = 0;
     ret = kstrtou16(buf, 0, &val);
     if (ret) {
         DEBUG_ERROR("Invaild input value [%s], errno: %d\n", buf, ret);
@@ -301,19 +306,17 @@ static ssize_t ncs23322_general_bit_show(struct device *dev, struct device_attri
     struct i2c_client *client = data->client;
     int reg = to_sensor_dev_attr_2(da)->index;
     int page = to_sensor_dev_attr_2(da)->nr;
-    u8 status;
+    int status;
 
-    status = -1;
     mutex_lock(&data->update_lock);
     status = ncs23322_read_bit_data(client, page, reg, bit);
     if (status < 0) {
-        DEBUG_ERROR("ncs23322 show value failed page [%d] reg [0x%x], errno: %d\n", page, reg,
-            status);
+        DEBUG_ERROR("ncs23322 show value failed page [%d] reg [0x%x], errno: %d\n", page, reg, status);
         mutex_unlock(&data->update_lock);
         return status;
     }
-    DEBUG_INFO("ncs23322 show value success page [%d] reg[0x%x] read value[0x%x]\n", page,
-      reg, status);
+
+    DEBUG_INFO("ncs23322 show value success page [%d] reg[0x%x] read value[0x%x]\n", page, reg, status);
     mutex_unlock(&data->update_lock);
     return snprintf(buf, PAGE_SIZE, "0x%x\n", status & 0xff);
 }
@@ -328,6 +331,7 @@ static ssize_t ncs23322_general_bit_store(struct device *dev, struct device_attr
     u8 val;
     int ret;
 
+    val = 0;
     ret = kstrtou8(buf, 0, &val);
     if (ret) {
         DEBUG_ERROR("Invaild input value [%s], errno: %d\n", buf, ret);
@@ -364,7 +368,7 @@ static ssize_t ncs23322_design_id_show(struct device *dev, struct device_attribu
     mutex_lock(&data->update_lock);
     ret = ncs23322_read_i2c_block_data(client, page, reg, DESIGNED_ID_SIZE, values);
     if (ret < 0) {
-        DEBUG_ERROR("ncs23322 read i2c block data failed page [%d] reg [0x%x] val [0x%llx], errno: %d\n", page, reg, val, ret);
+        DEBUG_ERROR("ncs23322 read i2c block data failed page [%d] reg [0x%x], errno: %d\n", page, reg, ret);
         mutex_unlock(&data->update_lock);
         return ret;
     }
@@ -389,6 +393,7 @@ static ssize_t ncs23322_design_id_store(struct device *dev, struct device_attrib
     u8 values[DESIGNED_ID_SIZE];
     u64 val;
 
+    val = 0;
     ret = kstrtou64(buf, 0, &val);
     if (ret) {
         DEBUG_ERROR("Invaild input value [%s], errno: %d\n", buf, ret);

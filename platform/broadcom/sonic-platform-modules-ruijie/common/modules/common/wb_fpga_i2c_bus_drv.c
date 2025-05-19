@@ -532,6 +532,9 @@ static int fpga_i2c_params_check(fpga_i2c_dev_t *fpga_i2c)
     uint8_t i2c_scale_value, i2c_filter_value, i2c_stretch_value;
 
     reg = &fpga_i2c->reg;
+    i2c_scale_value   = 0;
+    i2c_filter_value  = 0;
+    i2c_stretch_value = 0;
     ret = 0;
     ret += fpga_reg_read(fpga_i2c, reg->i2c_scale, &i2c_scale_value);
     ret += fpga_reg_read(fpga_i2c, reg->i2c_filter, &i2c_filter_value);
@@ -712,6 +715,7 @@ static int fpga_i2c_config_init(fpga_i2c_dev_t *fpga_i2c)
             return -ENOSYS;
         }
 
+        i2c_data_buf_len_reg = 0;
         rv = of_property_read_u32(dev->of_node, "i2c_data_buf_len_reg", &i2c_data_buf_len_reg);
         if (rv == 0) {
             ret = fpga_reg_read_32(fpga_i2c, i2c_data_buf_len_reg, &reg->i2c_data_buf_len);
@@ -729,10 +733,10 @@ static int fpga_i2c_config_init(fpga_i2c_dev_t *fpga_i2c)
             ret = of_property_read_u32(dev->of_node, "i2c_data_buf_len", &reg->i2c_data_buf_len);
             if (ret != 0) {
                 reg->i2c_data_buf_len = FPGA_I2C_RDWR_MAX_LEN_DEFAULT;
-                ret = 0;
             }
         }
 
+        i2c_offset_reg = 0;
         rv = of_property_read_u32(dev->of_node, "i2c_offset_reg", &i2c_offset_reg);
         if (rv == 0) {
             ret = fpga_reg_read_32(fpga_i2c, i2c_offset_reg, &i2c_offset_val);

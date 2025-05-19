@@ -431,6 +431,7 @@ static ssize_t store_temp(struct device *dev, struct device_attribute *devattr,
 	u16 reg;
 	u8 regaddr;
 
+    val = 0;
 	if (kstrtol(buf, 10, &val))
 		return -EINVAL;
 
@@ -464,6 +465,7 @@ static ssize_t store_temp_crit_hyst(struct device *dev, struct device_attribute
 	if (IS_ERR(data))
 		return PTR_ERR(data);
 
+    val = 0;
 	if (kstrtol(buf, 10, &val))
 		return -EINVAL;
 
@@ -499,6 +501,7 @@ static ssize_t reset_temp_history(struct device *dev,
 	struct i2c_client *client = data->client;
 	long val;
 
+    val = 0;
 	if (kstrtol(buf, 10, &val))
 		return -EINVAL;
 
@@ -533,6 +536,7 @@ static ssize_t set_update_interval(struct device *dev,
 	unsigned long val;
 	int err, rate;
 
+    val = 0;
 	err = kstrtoul(buf, 10, &val);
 	if (err)
 		return err;
@@ -590,12 +594,13 @@ static int timeout_cfg(struct device *dev, int state)
 
     mutex_lock(&data->update_lock);
     /* read the Consecutive alert register */
-    reg_value = i2c_smbus_read_byte_data(client, TMP401_DEVICE_CAR_REG);
-    if (reg_value < 0) {
-        dev_err(&client->dev, "Failed to read. reg:0x%0x, value:%d\n", TMP401_DEVICE_CAR_REG, reg_value);
+    rv = i2c_smbus_read_byte_data(client, TMP401_DEVICE_CAR_REG);
+    if (rv < 0) {
+        dev_err(&client->dev, "Failed to read. reg:0x%0x, rv:%d\n", TMP401_DEVICE_CAR_REG, rv);
         mutex_unlock(&data->update_lock);
         return -EIO;
     }
+    reg_value = (u8)rv;
     dev_dbg(&client->dev, "get register value. reg:0x%0x, value:0x%0x\n", TMP401_DEVICE_CAR_REG, reg_value);
 
     /* same value case, do not write */
@@ -635,6 +640,7 @@ static ssize_t set_timeout_en(struct device *dev,
     data = dev_get_drvdata(dev);
     client = data->client;
 
+    val = 0;
     err = kstrtoint(buf, 0, &val);
     if (err) {
         dev_err(&client->dev,
@@ -659,6 +665,7 @@ static ssize_t show_timeout_en(struct device *dev,
     u8 reg_value;
     struct tmp401_data *data;
     struct i2c_client *client;
+    int rv;
 
     data = dev_get_drvdata(dev);
     client = data->client;
@@ -676,11 +683,12 @@ static ssize_t show_timeout_en(struct device *dev,
     }
 
     /* read the Consecutive alert register */
-    reg_value = i2c_smbus_read_byte_data(client, TMP401_DEVICE_CAR_REG);
-    if (reg_value < 0) {
-        dev_err(&client->dev, "Failed to read. reg:0x%0x, value:%d\n", TMP401_DEVICE_CAR_REG, reg_value);
+    rv = i2c_smbus_read_byte_data(client, TMP401_DEVICE_CAR_REG);
+    if (rv < 0) {
+        dev_err(&client->dev, "Failed to read. reg:0x%0x, rv:%d\n", TMP401_DEVICE_CAR_REG, rv);
         return -EIO;
     }
+    reg_value = (u8)rv;
     dev_dbg(&client->dev, "get register value. reg:0x%0x, value:0x%0x\n", TMP401_DEVICE_CAR_REG, reg_value);
 
     /* decode the register value */
