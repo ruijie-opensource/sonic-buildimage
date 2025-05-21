@@ -1,0 +1,85 @@
+diff --git a/orchagent/portsorch.cpp b/orchagent/portsorch.cpp
+index 14b6d178..d3dee662 100644
+--- a/orchagent/portsorch.cpp
++++ b/orchagent/portsorch.cpp
+@@ -1682,11 +1682,7 @@ bool PortsOrch::setPortAdminStatus(Port &port, bool state)
+         {
+             setHostTxReady(port, "false");
+         }
+-        task_process_status handle_status = handleSaiSetStatus(SAI_API_PORT, status);
+-        if (handle_status != task_success)
+-        {
+-            return parseHandleSaiStatusFailure(handle_status);
+-        }
++        return true;
+     }
+ 
+     bool gbstatus = setGearboxPortsAttr(port, SAI_PORT_ATTR_ADMIN_STATE, &state);
+diff --git a/orchagent/vxlanorch.cpp b/orchagent/vxlanorch.cpp
+index 05a2d3e6..87fa0c25 100644
+--- a/orchagent/vxlanorch.cpp
++++ b/orchagent/vxlanorch.cpp
+@@ -1084,15 +1084,20 @@ bool VxlanTunnel::createDynamicDIPTunnel(const std::string dip, tunnel_user_t us
+         tunnel_orch->getTunnelNameFromDIP(dip, tunnel_name);
+         auto dipaddr = IpAddress(dip);
+         dip_tunnel = (new VxlanTunnel(tunnel_name, src_ip_, dipaddr, TNL_CREATION_SRC_EVPN));
++        TUNNELMAP_SET_VLAN(mapper_list);
++        TUNNELMAP_SET_VRF(mapper_list);
++        if(!dip_tunnel->createTunnelHw(mapper_list,TUNNEL_MAP_USE_COMMON_ENCAP_DECAP, false))
++        {
++            SWSS_LOG_NOTICE("Failed to create P2P Tunnel remote IP %s ", dip.c_str());
++            delete dip_tunnel;
++            return false;
++        }
+         tunnel_orch->addTunnel(tunnel_name,dip_tunnel);
+ 
+         memset(&tnl_refcnts,0,sizeof(tunnel_refcnt_t));
+         updateRemoteEndPointRefCnt(true,tnl_refcnts,usr);
+         tnl_users_[dip] = tnl_refcnts;
+ 
+-        TUNNELMAP_SET_VLAN(mapper_list);
+-        TUNNELMAP_SET_VRF(mapper_list);
+-        dip_tunnel->createTunnelHw(mapper_list,TUNNEL_MAP_USE_COMMON_ENCAP_DECAP, false);
+         SWSS_LOG_NOTICE("Created P2P Tunnel remote IP %s ", dip.c_str());
+     }
+     else 
+@@ -1151,7 +1156,11 @@ bool VxlanTunnel::deleteDynamicDIPTunnel(const std::string dip, tunnel_user_t us
+  
+         TUNNELMAP_SET_VLAN(mapper_list);
+         TUNNELMAP_SET_VRF(mapper_list);
+-        dip_tunnel->deleteTunnelHw(mapper_list,TUNNEL_MAP_USE_COMMON_ENCAP_DECAP, false);
++        if (!dip_tunnel->deleteTunnelHw(mapper_list,TUNNEL_MAP_USE_COMMON_ENCAP_DECAP, false))
++        {
++            SWSS_LOG_NOTICE("Failed to delete P2P Tunnel : %s", tunnel_name.c_str());
++            return false;
++        }
+  
+         tnl_users_.erase(dip);
+  
+@@ -1596,7 +1605,11 @@ bool  VxlanTunnelOrch::addTunnelUser(const std::string remote_vtep, uint32_t vni
+         return true;
+     }
+ 
+-    vtep_ptr->createDynamicDIPTunnel(remote_vtep, usr);
++    if(!vtep_ptr->createDynamicDIPTunnel(remote_vtep, usr))
++    {
++        SWSS_LOG_NOTICE("Failed to create dynamic DIP Tunnel. user=%d remote_vtep=%s", usr,remote_vtep.c_str()); 
++        return false;
++    }
+ 
+     getTunnelNameFromDIP(remote_vtep, tunnel_name);
+     dip_tunnel = getVxlanTunnel(tunnel_name);
+@@ -1672,7 +1685,12 @@ bool  VxlanTunnelOrch::delTunnelUser(const std::string remote_vtep, uint32_t vni
+         gPortsOrch->removeTunnel(tunnelPort);
+     }
+ 
+-    vtep_ptr->deleteDynamicDIPTunnel(remote_vtep, usr);
++    if (!vtep_ptr->deleteDynamicDIPTunnel(remote_vtep, usr))
++    {
++        SWSS_LOG_NOTICE("Failed to delete dynamic DIP tunnel, remote=%s vlan=%d usr=%d vrf_id=%lx",
++                                         remote_vtep.c_str(), vlan, usr, vrf_id);
++        return false;
++    }
+     SWSS_LOG_NOTICE("diprefcnt for remote %s = %d",
+                      remote_vtep.c_str(), vtep_ptr->getRemoteEndPointRefCnt(remote_vtep));
+ 

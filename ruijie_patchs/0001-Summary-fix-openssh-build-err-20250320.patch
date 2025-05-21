@@ -1,0 +1,30 @@
+From 310b7f502bc271691acb160406f0e78ff1d97f1c Mon Sep 17 00:00:00 2001
+From: ruijie-opensource <opensource@ruijie.com.cn>
+Date: Fri, 21 Mar 2025 11:12:42 +0800
+Subject: [PATCH] Summary:fix openssh build err 20250320
+
+BranchName:
+CAFID:
+BUGID:
+WorkPackageName:
+The ratio of self research code(0~1):
+---
+ rules/openssh.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/rules/openssh.mk b/rules/openssh.mk
+index 87bc2ee5c..a96cea8d3 100644
+--- a/rules/openssh.mk
++++ b/rules/openssh.mk
+@@ -1,7 +1,7 @@
+ # openssh package
+ 
+ OPENSSH_VERSION := 9.2p1
+-OPENSSH_VERSION_FULL := $(OPENSSH_VERSION)-2+deb12u3
++OPENSSH_VERSION_FULL := $(OPENSSH_VERSION)-2+deb12u5
+ 
+ export OPENSSH_VERSION OPENSSH_VERSION_FULL
+ 
+-- 
+2.25.1
+

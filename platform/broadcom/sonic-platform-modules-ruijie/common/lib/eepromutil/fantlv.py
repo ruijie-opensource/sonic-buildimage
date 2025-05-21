@@ -1,19 +1,21 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
+
 class FantlvException(Exception):
-    def __init__(self,  message='fantlverror', code=-100):
+    def __init__(self, message='fantlverror', code=-100):
         err = 'errcode: {0} message:{1}'.format(code, message)
         Exception.__init__(self, err)
         self.code = code
         self.message = message
 
-class fan_tlv(object):
+
+class fan_tlv():
     HEAD_INFO = "\x01\x7e\x01\xf1"
-    VERSION = 0x01                       # E2PROM file init version is 0x01
-    FLAG = 0x7E                       #new version E2PROM mark as 0x7E
-    HW_VER = 0X01                       # consists of master version and revised version
-    TYPE = 0xf1                       # hardware type define
-    TLV_LEN = 00                        # vaild data length（16bit）
+    VERSION = 0x01
+    FLAG = 0x7E
+    HW_VER = 0X01
+    TYPE = 0xf1
+    TLV_LEN = 00
     _FAN_TLV_HDR_LEN = 6
     _FAN_TLV_CRC_LEN = 2
 
@@ -21,8 +23,6 @@ class fan_tlv(object):
     _FAN_TLV_TYPE_SN = 0x03
     _FAN_TLV_TYPE_HW_INFO = 0x05
     _FAN_TLV_TYPE_DEV_TYPE = 0x06
-
-    _fandecodetime = 0
 
     @property
     def dstatus(self):
@@ -32,29 +32,33 @@ class fan_tlv(object):
     def typename(self):
         return self._typename
 
+    @typename.setter
+    def typename(self, value):
+        self._typename = value
+
     @property
     def typesn(self):
         return self._typesn
+
+    @typesn.setter
+    def typesn(self, value):
+        self._typesn = value
 
     @property
     def typehwinfo(self):
         return self._typehwinfo
 
+    @typehwinfo.setter
+    def typehwinfo(self, value):
+        self._typehwinfo = value
+
     @property
     def typedevtype(self):
         return self._typedevtype
 
-    @property
-    def fanbus(self):
-        return self._fanbus
-
-    @property
-    def fanloc(self):
-        return self._fanloc
-
-    @property
-    def fandecodetime(self):
-        return self._fandecodetime
+    @typedevtype.setter
+    def typedevtype(self, value):
+        self._typedevtype = value
 
     def __init__(self):
         self._typename = ""
@@ -63,39 +67,38 @@ class fan_tlv(object):
         self._typedevtype = ""
         self._dstatus = 0
 
-    def strtoarr(self, str):
+    def strtoarr(self, val):
         s = []
-        if str is not None:
-            for index in range(len(str)):
-                s.append(str[index])
+        if not isinstance(val, str):
+            return s
+        for index in val:
+            s.append(index)
         return s
 
-    def str_to_hex(self,rest_v):
-        value = 0
-        for index in range(len(rest_v)):
-            value |= ord(rest_v[index]) << ((len(rest_v) - index - 1) * 8)
-        return value
-
-    def hex_to_str(self,s):
+    def hex_to_str(self, s):
         len_t = len(s)
-        if len_t % 2 != 0:
+        if int(len_t % 2) != 0:
             return 0
         ret = ""
         for t in range(0, int(len_t / 2)):
             ret += chr(int(s[2 * t:2 * t + 2], 16))
         return ret
 
-    def generate_fan_value(self):
-        bin_buffer = [chr(0xff)] * 256
+    def generate_fan_value(self, size=256):
+        bin_buffer = [chr(0x00)] * size
         bin_buffer[0] = chr(self.VERSION)
         bin_buffer[1] = chr(self.FLAG)
         bin_buffer[2] = chr(self.HW_VER)
         bin_buffer[3] = chr(self.TYPE)
 
-        temp_t = "%08x" % self.typedevtype  # handle devtype first
+        temp_t = "%08x" % self.typedevtype
         typedevtype_t = self.hex_to_str(temp_t)
         total_len = len(self.typename) + len(self.typesn) + \
             len(self.typehwinfo) + len(typedevtype_t) + 8
+
+        rawdata_len = self._FAN_TLV_HDR_LEN + total_len + 2
+        if rawdata_len > size:
+            raise FantlvException("Generate rg tlv value failed, totallen: %d more than e2_size: %d" % (rawdata_len, size), -10)
 
         bin_buffer[4] = chr(total_len >> 8)
         bin_buffer[5] = chr(total_len & 0x00FF)
@@ -125,10 +128,9 @@ class fan_tlv(object):
                    len(typedevtype_t)] = self.strtoarr(typedevtype_t)
         index_start = index_start + 2 + len(typedevtype_t)
 
-        crcs = fan_tlv.fancrc(''.join(bin_buffer[0:index_start]))  # 2bytes checking
+        crcs = fan_tlv.fancrc(''.join(bin_buffer[0:index_start]))
         bin_buffer[index_start] = chr(crcs >> 8)
         bin_buffer[index_start + 1] = chr(crcs & 0x00ff)
-        # printvalue(bin_buffer)
         return bin_buffer
 
     def decode(self, e2):
@@ -144,7 +146,6 @@ class fan_tlv(object):
         tlv_index = self._FAN_TLV_HDR_LEN
         tlv_end = self._FAN_TLV_HDR_LEN + self.TLV_LEN
 
-        # check sum
         if len(e2) < self._FAN_TLV_HDR_LEN + self.TLV_LEN + 2:
             raise FantlvException("Fan tlv eeprom len error!", -2)
         sumcrc = fan_tlv.fancrc(e2[0:self._FAN_TLV_HDR_LEN + self.TLV_LEN])
@@ -152,8 +153,7 @@ class fan_tlv(object):
                       ) << 8 | ord(e2[self._FAN_TLV_HDR_LEN + self.TLV_LEN + 1])
         if sumcrc != readcrc:
             raise FantlvException("Fan tlv eeprom checksum error!", -1)
-        else:
-            self._dstatus = 0
+        self._dstatus = 0
         while (tlv_index + 2) < len(e2) and tlv_index < tlv_end:
             s = self.decoder(
                 e2[tlv_index:tlv_index + 2 + ord(e2[tlv_index + 1])])
@@ -164,15 +164,16 @@ class fan_tlv(object):
 
     @staticmethod
     def fancrc(t):
-        sum = 0
-        for index in range(len(t)):
-            sum += ord(t[index])
-        return sum
+        crc = 0
+        for item in t:
+            crc += ord(item)
+        return crc
 
     def decoder(self, t):
         try:
             name = ""
             value = ""
+            _len = 0
             if ord(t[0]) == self._FAN_TLV_TYPE_NAME:
                 name = "Product Name"
                 _len = ord(t[1])
@@ -194,10 +195,10 @@ class fan_tlv(object):
                 value = "0x"
                 for c in t[2:2 + ord(t[1])]:
                     value += "%02X" % (ord(c),)
-                self._typedevtype = int(value,16)
+                self._typedevtype = int(value, 16)
         except Exception as e:
             print(e)
-        return {"name": name, "code": ord(t[0]), "value": value,"lens": _len}
+        return {"name": name, "code": ord(t[0]), "value": value, "lens": _len}
 
     def __str__(self):
         formatstr = "VERSION     : 0x%02x  \n" \
@@ -207,6 +208,5 @@ class fan_tlv(object):
                     "typename    : %s      \n" \
                     "typesn      : %s      \n" \
                     "typehwinfo  : %s      \n"
-        return formatstr % (self.VERSION, self.FLAG, self.HW_VER, self.TYPE, self.typename, self.typesn, self.typehwinfo)
-
-
+        return formatstr % (self.VERSION, self.FLAG, self.HW_VER, self.TYPE,
+                            self.typename, self.typesn, self.typehwinfo)

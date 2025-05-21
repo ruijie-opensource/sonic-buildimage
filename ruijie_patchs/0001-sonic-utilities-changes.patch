@@ -1,0 +1,22 @@
+diff --git a/config/config_mgmt.py b/config/config_mgmt.py
+index 4e3115bd..52513a87 100644
+--- a/config/config_mgmt.py
++++ b/config/config_mgmt.py
+@@ -461,7 +461,16 @@ class ConfigMgmtDPB(ConfigMgmt):
+             # Verify in Asic DB,
+             self._verifyAsicDB(db=dataBase, ports=delPorts, portMap=if_name_map, \
+                 timeout=MAX_WAIT)
+-            self.writeConfigDB(addConfigtoLoad)
++            # The sequence cannot be guaranteed when the brk port written to the config db together
++            # port out of order will make err in sdk, so write each port individually 
++            ports = list(portJson['PORT'].keys())
++            for port in ports:
++                singleConfigtoLoad = dict()
++                tmp = dict()
++                tmp[port] = addConfigtoLoad['PORT'][port]
++                singleConfigtoLoad['PORT'] = tmp
++                self.writeConfigDB(singleConfigtoLoad)
++            # self.writeConfigDB(addConfigtoLoad)
+ 
+         except Exception as e:
+             self.sysLog(doPrint=True, logLevel=syslog.LOG_ERR, msg=str(e))
