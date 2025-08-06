@@ -10,18 +10,18 @@ install_python_api_package() {
 }
 
 remove_python_api_package() {
-    rv=$(pip show sonic-platform > /dev/null 2>/dev/null)
+    rv=$(pip3 show sonic-platform > /dev/null 2>/dev/null)
     if [ $? -eq 0 ]; then
         rv=$(pip3 uninstall -y sonic-platform > /dev/null 2>/dev/null)
     fi
 }
 
 if [[ "$1" == "init" ]]; then
-    echo "b6510 init"
+    echo "b6510-48vs8cq init"
     install_python_api_package
 
 elif [[ "$1" == "deinit" ]]; then
     remove_python_api_package
 else
-     echo "B6510-48VS8CQ_PLATFORM : Invalid option !"
+     echo "b6510-48vs8cq_platform : Invalid option !"
 fi

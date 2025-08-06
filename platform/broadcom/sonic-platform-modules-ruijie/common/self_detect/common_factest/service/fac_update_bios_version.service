@@ -1,0 +1,12 @@
+[Unit]
+Description= update bmc bios version service.
+After=network.target
+After=rg_platform_driver.service
+DefaultDependencies=no
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/fac_bios_version.sh >/dev/null 2>&1 &
+
+[Install]
+WantedBy=multi-user.target

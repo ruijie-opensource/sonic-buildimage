@@ -1,45 +1,44 @@
 #!/usr/bin/python3
 # -*- coding: UTF-8 -*-
-#-------------------------------------------------------------------------------
-# Name:         ruijieconfig.py 
-# Purpose:      block the difference between various product/onie version for other module
+# -------------------------------------------------------------------------------
+# Name:         ruijieconfig.py
+# Purpose:      为其他模块屏蔽由于产品型号/onie版本出现的差异
 #
-# Author:      rd
+# Author:      tjm
 #
 # Created:     02/07/2018
-# Copyright:   (c) rd 2018
-#-------------------------------------------------------------------------------
+# Copyright:   (c) tjm 2018
+# -------------------------------------------------------------------------------
 import sys
 import os
+import subprocess
+import time
 from rjutil.baseutil import get_machine_info
 from rjutil.baseutil import get_platform_info
+from rjutil.baseutil import get_board_id
+import binascii
+import termios
+import multiprocessing
 
-__all__ = ["getdeviceplatform", "get_rjconfig_info", "MONITOR_CONST", "MAILBOX_DIR", "DEVICE",
-           "GLOBALCONFIG", "GLOBALINITPARAM", "GLOBALINITCOMMAND", "MAC_LED_RESET", "STARTMODULE", 
-           "fanloc", "RUIJIE_CARDID", "RUIJIE_PRODUCTNAME", "RUIJIE_PART_NUMBER",
-           "RUIJIE_LABEL_REVISION", "RUIJIE_MAC_SIZE", "RUIJIE_MANUF_NAME", "RUIJIE_MANUF_COUNTRY",
-           "RUIJIE_VENDOR_NAME", "RUIJIE_DIAG_VERSION", "RUIJIE_SERVICE_TAG", "E2_PROTECT", 
-           "E2_LOC", "FAN_PROTECT", "FANS_DEF", "MONITOR_FANS_LED", "MONITOR_SYS_FAN_LED",
-           "MONITOR_SYS_PSU_LED", "MONITOR_FAN_STATUS", "MONITOR_PSU_STATUS", "MONITOR_DEV_STATUS",
-           "MONITOR_DEV_STATUS_DECODE", "DEV_LEDS", "MAC_AVS_PARAM", "MAC_DEFAULT_PARAM",
-           "FRULISTS", "rg_eeprom", "i2ccheck_params", "FANCTROLDEBUG", "DEVMONITORDEBUG"]
 
 def getdeviceplatform():
     x = get_platform_info(get_machine_info())
-    if x != None:
+    if x is not None:
         filepath = "/usr/share/sonic/device/" + x
     return filepath
 
 
-platform = get_platform_info(get_machine_info())  #         platform         get platform info             x86_64-ruijie_b6520-64cq-r0
-platformpath = getdeviceplatform()             #         platformpath     get mappable docker contents    /usr/share/sonic/device/x86_64-ruijie_b6520-64cq-r0
-MAILBOX_DIR = "/sys/bus/i2c/devices/"        # sysfs top contents
-grtd_productfile = (platform + "_config").replace("-","_")
+platform = get_platform_info(get_machine_info())  # platform         获取平台信息             x86_64-ruijie_b6520-64cq-r0
+board_id = get_board_id(get_machine_info())
+platformpath = getdeviceplatform()  # platformpath     获取可映射docker目录    /usr/share/sonic/device/x86_64-ruijie_b6520-64cq-r0
+MAILBOX_DIR = "/sys/bus/i2c/devices/"        # sysfs 顶层目录
+grtd_productfile = (platform + "_config").replace("-", "_")
 common_productfile = "ruijiecommon"
-configfile_pre   =  "/usr/local/bin/"   # py's contents， use /usr/local/bin temporarily
-
+platform_configfile = (platform + "_" + board_id + "_config").replace("-", "_") # platfrom + board_id
+configfile_pre = "/usr/local/bin/"   # py放的目录， 暂时用/usr/local/bin 后续修订
 sys.path.append(platformpath)
 sys.path.append(configfile_pre)
+
 
 def get_rjconfig_info(attr_key):
     rjconf_filename = platformpath + "/plugins" + "/rj.conf"
@@ -54,55 +53,63 @@ def get_rjconfig_info(attr_key):
                 return tokens[1].strip()
     return None
 
-#####BMC-Password###
+
+#####BMC密码###
 OPENBMC_PASSWORD = get_rjconfig_info("OPENBMC_PASSWORD")
-OPENBMC_PASSWORD = OPENBMC_PASSWORD if(OPENBMC_PASSWORD != None) else "0penBmc"
+OPENBMC_PASSWORD = OPENBMC_PASSWORD if(OPENBMC_PASSWORD is not None) else "0penBmc"
 
 ############################################################################################
-##  if there is no specific file, use common file
-module_product = None
-if os.path.exists(configfile_pre + grtd_productfile + ".py"):
+# 当不存在个性化文件时，使用通用文件
+global module_product
+if os.path.exists(configfile_pre + platform_configfile + ".py"):
+    module_product  = __import__(platform_configfile, globals(), locals(), [], 0)
+elif os.path.exists(configfile_pre + grtd_productfile + ".py"):
     module_product  = __import__(grtd_productfile, globals(), locals(), [], 0)
 elif os.path.exists(configfile_pre + common_productfile + ".py"):
     module_product  = __import__(common_productfile, globals(), locals(), [], 0)
 else:
-    print("No Configuration existed, quit")
+    print("不存在配置文件，退出")
     exit(-1)
 ############################################################################################
 
-DEVICE  = module_product.DEVICE
+DEVICE = module_product.DEVICE
 
-##########Driver loading needs parameters
-#get different product configuration
-RUIJIE_GLOBALCONFIG ={
-    "DRIVERLISTS":module_product.DRIVERLISTS,
-    "QSFP": {"startbus":module_product.PCA9548START, "endbus":module_product.PCA9548BUSEND},
-    "DEVS": DEVICE
+# 驱动加载需要变量
+# 获取差异平台配置
+RUIJIE_GLOBALCONFIG = {
+    "DRIVERLISTS": module_product.DRIVERLISTS,
+    "QSFP": {"startbus": module_product.PCA9548START, "endbus": module_product.PCA9548BUSEND},  # 顽固分子单独处理
+    "OPTOE": module_product.OPTOE,  # 顽固分子二号单独处理
+    "DEVS": DEVICE,
+    "BLACKLIST_DRIVERS": module_product.BLACKLIST_DRIVERS
 }
 GLOBALCONFIG = RUIJIE_GLOBALCONFIG
 GLOBALINITPARAM = module_product.INIT_PARAM
 GLOBALINITCOMMAND = module_product.INIT_COMMAND
+GLOBALINITPARAM_PRE = module_product.INIT_PARAM_PRE
+GLOBALINITCOMMAND_PRE = module_product.INIT_COMMAND_PRE
 
-fancontrol_loc        = module_product.fancontrol_loc
+
+fancontrol_loc = module_product.fancontrol_loc
 fancontrol_config_loc = module_product.fancontrol_config_loc
-MAC_LED_RESET          = module_product.MAC_LED_RESET
-###########Stat-up module parameters
+MAC_LED_RESET = module_product.MAC_LED_RESET
+# 启机模块变量
 STARTMODULE = module_product.STARTMODULE
 FIRMWARE_TOOLS = module_product.FIRMWARE_TOOLS
 
 
-##########Manufacturing-Test need parameters
+# 生测需要变量
 FACTESTMODULE = module_product.FACTESTMODULE
-TESTCASE      = module_product.TESTCASE
-menuList      = module_product.menuList
-alltest       = module_product.alltest
-diagtestall   = module_product.diagtestall
-looptest      = module_product.looptest
-fanloc        = module_product.fanloc
-fanlevel      = module_product.fanlevel        # fan adjustment level
-TEMPIDCHANGE  = module_product.TEMPIDCHANGE
-CPLDVERSIONS  = module_product.CPLDVERSIONS
-RUIJIE_CARDID      = module_product.RUIJIE_CARDID
+TESTCASE = module_product.TESTCASE
+menuList = module_product.menuList
+alltest = module_product.alltest
+diagtestall = module_product.diagtestall
+looptest = module_product.looptest
+fanloc = module_product.fanloc
+fanlevel = module_product.fanlevel        # 风扇调数等级
+TEMPIDCHANGE = module_product.TEMPIDCHANGE
+CPLDVERSIONS = module_product.CPLDVERSIONS
+RUIJIE_CARDID = module_product.RUIJIE_CARDID
 RUIJIE_PRODUCTNAME = module_product.RUIJIE_PRODUCTNAME
 
 RUIJIE_PART_NUMBER = module_product.RUIJIE_PART_NUMBER
@@ -115,54 +122,72 @@ RUIJIE_VENDOR_NAME = module_product.RUIJIE_VENDOR_NAME
 RUIJIE_DIAG_VERSION = module_product.RUIJIE_DIAG_VERSION
 RUIJIE_SERVICE_TAG = module_product.RUIJIE_SERVICE_TAG
 
-E2_PROTECT         = module_product.E2_PROTECT
-E2_LOC             = module_product.E2_LOC
-FAN_PROTECT        = module_product.FAN_PROTECT
+E2_PROTECT = module_product.E2_PROTECT
+E2_LOC = module_product.E2_LOC
+FAN_PROTECT = module_product.FAN_PROTECT
 
-FANS_DEF           = module_product.FANS_DEF
-MONITOR_SYS_LED    = module_product.MONITOR_SYS_LED
-MONITOR_FANS_LED =   module_product.MONITOR_FANS_LED
+FANS_DEF = module_product.FANS_DEF
+MONITOR_SYS_LED = module_product.MONITOR_SYS_LED
+MONITOR_FANS_LED = module_product.MONITOR_FANS_LED
 MONITOR_SYS_FAN_LED = module_product.MONITOR_SYS_FAN_LED
 MONITOR_SYS_PSU_LED = module_product.MONITOR_SYS_PSU_LED
-MONITOR_FAN_STATUS  = module_product.MONITOR_FAN_STATUS
-MONITOR_PSU_STATUS  = module_product.MONITOR_PSU_STATUS
-MONITOR_DEV_STATUS  = module_product.MONITOR_DEV_STATUS
-MONITOR_DEV_STATUS_DECODE  = module_product.MONITOR_DEV_STATUS_DECODE
-DEV_MONITOR_PARAM  = module_product.DEV_MONITOR_PARAM
+MONITOR_FAN_STATUS = module_product.MONITOR_FAN_STATUS
+MONITOR_PSU_STATUS = module_product.MONITOR_PSU_STATUS
+MONITOR_DEV_STATUS = module_product.MONITOR_DEV_STATUS
+MONITOR_DEV_STATUS_DECODE = module_product.MONITOR_DEV_STATUS_DECODE
+DEV_MONITOR_PARAM = module_product.DEV_MONITOR_PARAM
 SLOT_MONITOR_PARAM = module_product.SLOT_MONITOR_PARAM
+REBOOT_CTRL_PARAM = module_product.REBOOT_CTRL_PARAM
+PMON_SYSLOG_STATUS = module_product.PMON_SYSLOG_STATUS
+PSU_FAN_FOLLOW = module_product.PSU_FAN_FOLLOW
+REBOOT_CAUSE_PARA = module_product.REBOOT_CAUSE_PARA
+CPLD_UPGRADE_PARAM = module_product.CPLD_UPGRADE_PARAM
+WARM_UPGRADE_PARAM = module_product.WARM_UPGRADE_PARAM
+UPGRADE_SUMMARY = module_product.UPGRADE_SUMMARY
+PLATFORM_E2_CONF = module_product.PLATFORM_E2_CONF
+PRODUCT_NAME_CONF = module_product.PRODUCT_NAME_CONF
 
 
-DEV_LEDS            = module_product.DEV_LEDS
-MEM_SLOTS            = module_product.MEM_SLOTS
+DEV_LEDS = module_product.DEV_LEDS
+MEM_SLOTS = module_product.MEM_SLOTS
 
-MAC_AVS_PARAM      = module_product.MAC_AVS_PARAM
-MAC_DEFAULT_PARAM  = module_product.MAC_DEFAULT_PARAM
-E2TYPE    = module_product.E2TYPE
-FRULISTS  = module_product.FRULISTS
-rg_eeprom    = "%d-%04x/eeprom" % (E2_LOC["bus"], E2_LOC["devno"])
+MAC_AVS_PARAM = module_product.MAC_AVS_PARAM
+MAC_DEFAULT_PARAM = module_product.MAC_DEFAULT_PARAM
+MAC_AVS_SYSFS_PARAM      = module_product.MAC_AVS_SYSFS_PARAM
+MAC_AVS_SYSFS_DEFAULT_PARAM  = module_product.MAC_AVS_SYSFS_DEFAULT_PARAM
+E2TYPE = module_product.E2TYPE
+FRULISTS = module_product.FRULISTS
+rg_eeprom = "%d-%04x/eeprom" % (E2_LOC["bus"], E2_LOC["devno"])
 factest_module = module_product.factest_module
 
-LOCAL_LED_CONTROL      = module_product.LOCAL_LED_CONTROL
+LOCAL_LED_CONTROL = module_product.LOCAL_LED_CONTROL
 
 PCIe_DEV_LIST = module_product.PCIe_DEV_LIST
 PCIe_SPEED_ITEM = module_product.PCIe_SPEED_ITEM
 i2ccheck_params = module_product.i2ccheck_params
+MANUINFO_CONF = module_product.MANUINFO_CONF
+AVS_VOUT_MODE_PARAM = module_product.AVS_VOUT_MODE_PARAM
+KEY_SIGNAL_CONF = module_product.KEY_SIGNAL_CONF
+SFF_POLLING_CONF = module_product.SFF_POLLING_CONF
+
+WARM_UPG_FLAG = module_product.WARM_UPG_FLAG
+WARM_UPGRADE_STARTED_FLAG = module_product.WARM_UPGRADE_STARTED_FLAG
 
 
 class MONITOR_CONST:
     TEMP_MIN = module_product.MONITOR_TEMP_MIN
-    K =module_product.MONITOR_K
-    MAC_IN =module_product.MONITOR_MAC_IN
-    DEFAULT_SPEED =module_product.MONITOR_DEFAULT_SPEED
-    MAX_SPEED =module_product.MONITOR_MAX_SPEED
-    MIN_SPEED =module_product.MONITOR_MIN_SPEED
-    MAC_ERROR_SPEED =module_product.MONITOR_MAC_ERROR_SPEED
-    FAN_TOTAL_NUM =module_product.MONITOR_FAN_TOTAL_NUM
-    MAC_UP_TEMP =module_product.MONITOR_MAC_UP_TEMP
-    MAC_LOWER_TEMP =module_product.MONITOR_MAC_LOWER_TEMP
-    MAC_MAX_TEMP   = module_product.MONITOR_MAC_MAX_TEMP
-    
-    MAC_WARNING_THRESHOLD =  module_product.MONITOR_MAC_WARNING_THRESHOLD
+    K = module_product.MONITOR_K
+    MAC_IN = module_product.MONITOR_MAC_IN
+    DEFAULT_SPEED = module_product.MONITOR_DEFAULT_SPEED
+    MAX_SPEED = module_product.MONITOR_MAX_SPEED
+    MIN_SPEED = module_product.MONITOR_MIN_SPEED
+    MAC_ERROR_SPEED = module_product.MONITOR_MAC_ERROR_SPEED
+    FAN_TOTAL_NUM = module_product.MONITOR_FAN_TOTAL_NUM
+    MAC_UP_TEMP = module_product.MONITOR_MAC_UP_TEMP
+    MAC_LOWER_TEMP = module_product.MONITOR_MAC_LOWER_TEMP
+    MAC_MAX_TEMP = module_product.MONITOR_MAC_MAX_TEMP
+
+    MAC_WARNING_THRESHOLD = module_product.MONITOR_MAC_WARNING_THRESHOLD
     OUTTEMP_WARNING_THRESHOLD = module_product.MONITOR_OUTTEMP_WARNING_THRESHOLD
     BOARDTEMP_WARNING_THRESHOLD = module_product.MONITOR_BOARDTEMP_WARNING_THRESHOLD
     CPUTEMP_WARNING_THRESHOLD = module_product.MONITOR_CPUTEMP_WARNING_THRESHOLD
@@ -173,14 +198,13 @@ class MONITOR_CONST:
     BOARDTEMP_CRITICAL_THRESHOLD = module_product.MONITOR_BOARDTEMP_CRITICAL_THRESHOLD
     CPUTEMP_CRITICAL_THRESHOLD = module_product.MONITOR_CPUTEMP_CRITICAL_THRESHOLD
     INTEMP_CRITICAL_THRESHOLD = module_product.MONITOR_INTEMP_CRITICAL_THRESHOLD
-    CRITICAL_NUM       = module_product.MONITOR_CRITICAL_NUM
+    CRITICAL_NUM = module_product.MONITOR_CRITICAL_NUM
     SHAKE_TIME = module_product.MONITOR_SHAKE_TIME
-    MONITOR_INTERVAL= module_product.MONITOR_INTERVAL
+    MONITOR_INTERVAL = module_product.MONITOR_INTERVAL
+    MONITOR_LED_INTERVAL = module_product.MONITOR_LED_INTERVAL
     MONITOR_FALL_TEMP = module_product.MONITOR_FALL_TEMP
+    MONITOR_PID_FLAG = module_product.MONITOR_PID_FLAG
+    MONITOR_PID_MODULE = module_product.MONITOR_PID_MODULE
 
     MONITOR_MAC_SOURCE_SYSFS = module_product.MONITOR_MAC_SOURCE_SYSFS
     MONITOR_MAC_SOURCE_PATH = module_product.MONITOR_MAC_SOURCE_PATH
-
-FANCTROLDEBUG = 0 # 1 means enable
-DEVMONITORDEBUG = 0 # 1 means enable
-

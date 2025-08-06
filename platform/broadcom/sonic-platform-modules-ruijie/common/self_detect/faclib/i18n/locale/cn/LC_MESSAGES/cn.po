@@ -1,0 +1,25 @@
+# Language cn translations for PACKAGE package.
+# Copyright (C) 2019 THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+#  <tjm@desktop-7v5kpta.localdomain>, 2019.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2019-04-16 11:45+0800\n"
+"PO-Revision-Date: 2019-04-16 11:46+0800\n"
+"Last-Translator:  <tjm@desktop-7v5kpta.localdomain>\n"
+"Language-Team: Language cn\n"
+"Language: cn\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: grtd_test.py:1490
+msgid "test"
+msgstr "测试"
+
+#: grtd_test.py:1504
+msgid "This is a translatable string."
+msgstr "测试"

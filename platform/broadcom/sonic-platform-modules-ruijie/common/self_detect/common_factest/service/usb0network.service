@@ -1,0 +1,13 @@
+[Unit]
+Description=Update interfaces configuration for adding eth0 private subnetwork
+After=network.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/usb0network.py start
+ExecStop=/usr/local/bin/usb0network.py stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

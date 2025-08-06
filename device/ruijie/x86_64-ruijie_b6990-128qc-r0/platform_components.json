@@ -1,0 +1,23 @@
+{
+    "chassis": {
+        "B6990-128QC": {
+            "component": {
+                "UPORT_FPGA": {},
+                "MAC_FPGA": {},
+                "DPORT_FPGA": {},
+                "CPU_CPLD": {},
+                "BASE_CPLD": {},
+                "UPORT_CPLD": {},
+                "UFCB_CPLD": {},
+                "MAC_CPLDA": {},
+                "MAC_CPLDB": {},
+                "MAC_CPLDC": {},
+                "DFCB_CPLD": {},
+                "DPORT_CPLD": {},
+                "BIOS": {},
+                "BMC": {}
+            }
+        }
+    }
+}
+

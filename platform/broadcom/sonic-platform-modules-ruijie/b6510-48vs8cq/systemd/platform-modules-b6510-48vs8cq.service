@@ -1,5 +1,5 @@
 [Unit]
-Description=b6510-48vs8cq platform modules
+Description=b6510-48vs8cq Platform modules
 Before=pmon.service
 DefaultDependencies=no
 

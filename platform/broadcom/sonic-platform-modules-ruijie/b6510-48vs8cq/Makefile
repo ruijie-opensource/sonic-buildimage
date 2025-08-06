@@ -2,11 +2,16 @@ PWD		= $(shell pwd)
 DIR_KERNEL_SRC = $(PWD)/modules/driver
 EXTRA_CFLAGS:= -I$(M)/include
 EXTRA_CFLAGS+= -Wall
+ifdef ENABLE_GCOV
+ifeq ($(ENABLE_GCOV), y)
+EXTRA_CFLAGS+= -fprofile-arcs -ftest-coverage -lgcov
+endif
+endif # ENABLE_GCOV
 SUB_BUILD_DIR = $(PWD)/build
 INSTALL_DIR = $(SUB_BUILD_DIR)/$(KERNEL_SRC)/$(INSTALL_MOD_DIR)
 INSTALL_SCRIPT_DIR = $(SUB_BUILD_DIR)/usr/local/bin
+INSTALL_LIB_DIR = $(SUB_BUILD_DIR)/usr/lib/python3.7/dist-packages
 
-KBUILD_EXTRA_SYMBOLS += $(DIR_KERNEL_SRC)/Module.symvers
 export KBUILD_EXTRA_SYMBOLS
 
 all:
@@ -15,8 +20,10 @@ all:
 	cp -r $(DIR_KERNEL_SRC)/*.ko $(INSTALL_DIR)
 	@if [ ! -d ${INSTALL_SCRIPT_DIR} ]; then mkdir -p ${INSTALL_SCRIPT_DIR} ;fi
 	cp -r $(PWD)/config/*  $(INSTALL_SCRIPT_DIR)
+	@if [ ! -d ${INSTALL_LIB_DIR} ]; then mkdir -p ${INSTALL_LIB_DIR} ;fi
+	@if [ -d $(PWD)/hal-config/ ]; then cp -r $(PWD)/hal-config/* ${INSTALL_LIB_DIR} ;fi
 clean:
-	rm -f ${DIR_KERNEL_SRC}/*.o ${DIR_KERNEL_SRC}/*.ko ${DIR_KERNEL_SRC}/*.mod.c ${DIR_KERNEL_SRC}/.*.cmd
-	rm -f ${DIR_KERNEL_SRC}/Module.markers ${DIR_KERNEL_SRC}/Module.symvers ${DIR_KERNEL_SRC}/modules.order
-	rm -rf ${DIR_KERNEL_SRC}/.tmp_versions
+	rm -f ${DIR_KERNEL_SRC}/*.o ${DIR_KERNEL_SRC}/*.ko ${DIR_KERNEL_SRC}/*.mod.c ${DIR_KERNEL_SRC}/.*.cmd 
+	rm -f ${DIR_KERNEL_SRC}/Module.markers ${DIR_KERNEL_SRC}/Module.symvers ${DIR_KERNEL_SRC}/modules.order 
+	rm -rf ${DIR_KERNEL_SRC}/.tmp_versions 
 	rm -rf $(SUB_BUILD_DIR)

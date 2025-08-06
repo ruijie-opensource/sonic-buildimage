@@ -1,0 +1,11 @@
+[Unit]
+Description= monitor bmc console on ttyS1 service.
+After=rg_platform_driver.service
+DefaultDependencies=no
+
+[Service]
+Restart=always
+ExecStart=/usr/local/bin/tty_console.py >/dev/null 2>&1 &
+
+[Install]
+WantedBy=multi-user.target

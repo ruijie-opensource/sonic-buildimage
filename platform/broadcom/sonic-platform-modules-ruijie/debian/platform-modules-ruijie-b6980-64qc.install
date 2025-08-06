@@ -1,0 +1,3 @@
+b6980-64qc/build/sonic_platform-1.0-py3-none-any.whl /usr/share/sonic/device/x86_64-ruijie_b6980-64qc-r0
+b6980-64qc/scripts/b6980-64qc_platform.sh /usr/local/bin
+b6980-64qc/systemd/platform-modules-b6980-64qc.service /etc/systemd/system

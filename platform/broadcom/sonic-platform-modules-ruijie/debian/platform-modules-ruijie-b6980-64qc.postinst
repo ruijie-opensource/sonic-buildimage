@@ -1,0 +1,16 @@
+#!/bin/sh
+# postinst
+
+kernel_version=$(uname -r)
+
+if [ -e /boot/System.map-${kernel_version} ]; then
+    depmod -a -F /boot/System.map-${kernel_version} ${kernel_version} || true
+fi
+
+#DEBHELPER#
+# Enable Ruijie-b6980-64qc-platform-service
+depmod -a 
+systemctl enable platform-modules-b6980-64qc.service
+systemctl start platform-modules-b6980-64qc.service
+
+#DEBHELPER#

@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
+import sys
 import click
 import os
+import subprocess
 import time
+from ruijieutil import *
 import syslog
-from ruijieconfig import MONITOR_CONST, FANCTROLDEBUG, MONITOR_FANS_LED, DEV_LEDS, MONITOR_PSU_STATUS, \
-        MONITOR_SYS_PSU_LED, MONITOR_DEV_STATUS, MONITOR_FAN_STATUS, MONITOR_DEV_STATUS_DECODE, \
-        MONITOR_SYS_FAN_LED, MONITOR_SYS_LED, fanloc
-
-from ruijieutil import rji2cget, getMacTemp_sysfs, write_sysfs_value, get_sysfs_value, strtoint, \
-        rji2cset
-
 import traceback
 import glob
-
+import copy
+import fcntl
+import math
+from rjutil.smbus import SMBus
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
-DEBUG_COMMON     = 0x01
+DEBUG_COMMON = 0x01
 DEBUG_LEDCONTROL = 0x02
 DEBUG_FANCONTROL = 0x04
+
+debuglevel = 0
+FANCTROL_DEBUG_FILE = "/etc/.fancontrol_debug_flag"
+
+OTP_REBOOT_JUDGE_FILE = "/etc/.otp_reboot_flag"  # coordination with REBOOT_CAUSE_PARA
 
 
 class AliasedGroup(click.Group):
@@ -34,83 +38,329 @@ class AliasedGroup(click.Group):
         elif len(matches) == 1:
             return click.Group.get_command(self, ctx, matches[0])
         ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))
-    
-def fanwarninglog(s):
-    #s = s.decode('utf-8').encode('gb2312')
-    syslog.openlog("FANCONTROL",syslog.LOG_PID)
-    syslog.syslog(syslog.LOG_WARNING,s)
-    
-def fancriticallog(s):
-    #s = s.decode('utf-8').encode('gb2312')
-    syslog.openlog("FANCONTROL",syslog.LOG_PID)
-    syslog.syslog(syslog.LOG_CRIT,s)
-    
-def fanerror(s):
-    #s = s.decode('utf-8').encode('gb2312')
-    syslog.openlog("FANCONTROL",syslog.LOG_PID)
-    syslog.syslog(syslog.LOG_ERR,s)
-    
-def fanwarningdebuglog(debuglevel,s):
-    #s = s.decode('utf-8').encode('gb2312')
-    if FANCTROLDEBUG & debuglevel:
-        syslog.openlog("FANCONTROL",syslog.LOG_PID)
-        syslog.syslog(syslog.LOG_DEBUG,s)
- 
 
-class FanControl(object):
+
+def fanwarninglog(s):
+    syslog.openlog("FANCONTROL", syslog.LOG_PID)
+    syslog.syslog(syslog.LOG_WARNING, s)
+
+
+def fancriticallog(s):
+    syslog.openlog("FANCONTROL", syslog.LOG_PID)
+    syslog.syslog(syslog.LOG_CRIT, s)
+
+
+def fanerror(s):
+    syslog.openlog("FANCONTROL", syslog.LOG_PID)
+    syslog.syslog(syslog.LOG_ERR, s)
+
+
+def faninfo(s):
+    syslog.openlog("FANCONTROL", syslog.LOG_PID)
+    syslog.syslog(syslog.LOG_INFO, s)
+
+
+def fanwarningdebuglog(debug, s):
+    if debuglevel & debug:
+        syslog.openlog("FANCONTROL", syslog.LOG_PID)
+        syslog.syslog(syslog.LOG_DEBUG, s)
+
+
+def exec_os_cmd(cmd):
+    status, output = subprocess.getstatusoutput(cmd)
+    if status:
+        print(output)
+    return status, output
+
+
+pidfile = -1
+
+
+def file_rw_lock(file_path):
+    global pidfile
+    pidfile = open(file_path, "r")
+    try:
+        fcntl.flock(pidfile, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 创建一个排他锁,并且所被锁住其他进程不会阻塞
+        fanwarningdebuglog(DEBUG_FANCONTROL, "file lock success")
+        return True
+    except Exception as e:
+        pidfile.close()
+        pidfile = -1
+        return False
+
+
+def file_rw_unlock():
+    try:
+        global pidfile
+
+        if pidfile != -1:
+            fcntl.flock(pidfile, fcntl.LOCK_UN)  # 释放锁
+            pidfile.close()
+            pidfile = -1
+            fanwarningdebuglog(DEBUG_FANCONTROL, "file unlock success")
+        else:
+            fanwarningdebuglog(DEBUG_FANCONTROL, "pidfile is invalid, do nothing")
+        return True
+    except Exception as e:
+        fanwarningdebuglog(DEBUG_FANCONTROL, "file unlock err, msg:%s" % (str(e)))
+        return False
+
+
+def readsysfs(location):
+    try:
+        locations = glob.glob(location)
+        with open(locations[0], 'rb') as fd1:
+            retval = fd1.read()
+        retval = retval.rstrip('\r\n')
+        retval = retval.lstrip(" ")
+    except Exception as e:
+        return False, (str(e) + " location[%s]" % location)
+    return True, retval
+
+
+class pid(object):
+    __pid_config = None
+
+    def __init__(self):
+        self.__pid_config = copy.deepcopy(MONITOR_CONST.MONITOR_PID_MODULE)
+
+    def get_para(self, name):
+        para = self.__pid_config.get(name)
+        return para
+
+    def get_temp_update(self, pid_para, current_temp):
+        temp = pid_para["value"]
+        if temp is None:
+            return None
+        temp.append(current_temp)
+        del temp[0]
+        return temp
+
+    def cacl(self, last_pwm, name, current_temp):
+        delta_pwm = 0
+        fanwarningdebuglog(DEBUG_FANCONTROL, "pid last_pwm = 0x%x" % last_pwm)
+
+        pid_para = self.get_para(name)
+        if pid_para is None:
+            fanwarningdebuglog(DEBUG_FANCONTROL, "get %s pid para failed" % name)
+            return None
+
+        temp = self.get_temp_update(pid_para, current_temp)
+        if temp is None:
+            fanwarningdebuglog(DEBUG_FANCONTROL, "get %s update failed" % name)
+            return None
+
+        type = pid_para["type"]
+        Kp = pid_para["Kp"]
+        Ki = pid_para["Ki"]
+        Kd = pid_para["Kd"]
+        target = pid_para["target"]
+        pwm_min = pid_para["pwm_min"]
+        pwm_max = pid_para["pwm_max"]
+        flag = pid_para["flag"]
+
+        if flag != 1:
+            fanwarningdebuglog(DEBUG_FANCONTROL, "%s pid flag == 0" % name)
+            return None
+
+        if type == "duty":
+            current_pwm = round(last_pwm * 100 / 255)
+        else:
+            current_pwm = last_pwm
+
+        if (temp[2] is None):
+            tmp_pwm = current_pwm
+        elif ((temp[0] is None) or (temp[1] is None)):
+            delta_pwm = Ki * (temp[2] - target)
+            tmp_pwm = current_pwm + delta_pwm
+        else:
+            delta_pwm = Kp * (temp[2] - temp[1]) + Ki * (temp[2] - target) + Kd * (temp[2] - 2 * temp[1] + temp[0])
+            tmp_pwm = current_pwm + delta_pwm
+
+        fanwarningdebuglog(DEBUG_FANCONTROL, "pid delta_pwm = %d" % delta_pwm)
+        if type == "duty":
+            pwm = round(tmp_pwm * 255 / 100)
+        else:
+            pwm = tmp_pwm
+
+        pwm = min(pwm, pwm_max)
+        pwm = max(pwm, pwm_min)
+        fanwarningdebuglog(DEBUG_FANCONTROL, "pid last_pwm = 0x%x, pwm = 0x%x" % (last_pwm, pwm))
+        return pwm
+
+
+class FanControl():
     critnum = 0
+    __pwm = MONITOR_CONST.MIN_SPEED  # 最终设置风扇转速值
+
+    error_temp = -9999  # 获取温度失败
+    invalid_temp = -10000  # 获取温度无效
+
     def __init__(self):
         self._fanOKNum = 0
         self._psuOKNum = 0
         self._intemp = -100.0
         self._mac_aver = -100.0
         self._mac_max = -100.0
-        self._preIntemp = -1000 # previous temperature
+        self._preIntemp = -1000  # 上一时刻温度
         self._outtemp = -100
         self._boardtemp = -100
         self._cputemp = -1000
+        self._sfftemp = self.invalid_temp
+        self._pre_openloop_pwm = MONITOR_CONST.MIN_SPEED
+        self.pid = pid()
+        pass
 
     @property
     def fanOKNum(self):
-        return self._fanOKNum;
+        return self._fanOKNum
 
     @property
     def psuOKNum(self):
-        return self._psuOKNum;
+        return self._psuOKNum
 
     @property
     def cputemp(self):
-        return self._cputemp;
- 
+        return self._cputemp
+
+    @property
+    def sfftemp(self):
+        return self._sfftemp
+
     @property
     def intemp(self):
-        return self._intemp;
-        
+        return self._intemp
+
     @property
     def outtemp(self):
-        return self._outtemp;
-        
+        return self._outtemp
+
     @property
     def boardtemp(self):
-        return self._boardtemp;
+        return self._boardtemp
 
     @property
     def mac_aver(self):
-        return self._mac_aver;
+        return self._mac_aver
 
     @property
     def preIntemp(self):
-        return self._preIntemp;
+        return self._preIntemp
+
+    @preIntemp.setter
+    def preIntemp(self, val):
+        self._preIntemp = val
+
+    @property
+    def pre_openloop_pwm(self):
+        return self._pre_openloop_pwm
+
+    @pre_openloop_pwm.setter
+    def pre_openloop_pwm(self, val):
+        self._pre_openloop_pwm = val
 
     @property
     def mac_max(self):
-        return self._mac_max;
+        return self._mac_max
 
     def sortCallback(self, element):
         return element['id']
 
-    def gettemp(self,ret):
-        u'''get inlet, outlet, hot-point and cpu temperature'''
+    def get_value_one_time(self, config):
+        try:
+            way = config.get("gettype")
+            if way == 'sysfs':
+                loc = config.get("loc")
+                ret, val = readsysfs(loc)
+                if ret == True:
+                    return True, int(val, 16)
+                else:
+                    return False, ("sysfs read %s failed. log:%s" % (loc, val))
+            elif way == "i2c":
+                bus = config.get("bus")
+                addr = config.get("loc")
+                offset = config.get("offset")
+                ret, val = rji2cget(bus, addr, offset)
+                if ret == True:
+                    return True, int(val, 16)
+                else:
+                    return False, ("i2c read failed. bus:%d , addr:0x%x, offset:0x%x" % (bus, addr, offset))
+            elif way == "io":
+                io_addr = config.get('io_addr')
+                val = io_rd(io_addr)
+                if len(val) != 0:
+                    return True, int(val, 16)
+                else:
+                    return False, ("io_addr read 0x%x failed" % io_addr)
+            elif way == "i2cword":
+                bus = config.get("bus")
+                addr = config.get("loc")
+                offset = config.get("offset")
+                ret, val = rji2cgetWord(bus, addr, offset)
+                if ret == True:
+                    return True, int(val, 16)
+                else:
+                    return False, ("i2cword read failed. bus:%d, addr:0x%x, offset:0x%x" % (bus, addr, offset))
+            elif way == "devfile":
+                path = config.get("path")
+                offset = config.get("offset")
+                read_len = config.get("read_len")
+                ret, val_list = dev_file_read(path, offset, read_len)
+                if ret == True:
+                    return True, val_list
+                else:
+                    return False, ("devfile read failed. path:%s, offset:0x%x, read_len:%d" % (path, offset, read_len))
+            elif way == 'cmd':
+                cmd = config.get("cmd")
+                ret, val = exec_os_cmd(cmd)
+                if ret:
+                    return False, ("cmd read exec %s failed, log: %s" % (cmd, val))
+                else:
+                    return True, int(val, 16)
+            else:
+                return False, "not support read type"
+        except Exception as e:
+            fanwarningdebuglog(DEBUG_COMMON, "get_value_one_time happen exception, log:%s" % str(e))
+            return False, str(e)
+
+    def get_value(self, config):
+        retrytime = 3
+        for i in range(retrytime):
+            ret, val = self.get_value_one_time(config)
+            if ret is True:
+                return True, val
+            if (i + 1) < retrytime:
+                time.sleep(0.1)
+        return False, val
+
+    def get_sff_temp(self, path):
+        loop = 1000
+        ret = False
+        try:
+            for i in range(0, loop):
+                ret = file_rw_lock(path)
+                if ret is True:
+                    break
+                time.sleep(0.001)
+
+            if ret is False:
+                fanwarningdebuglog(DEBUG_FANCONTROL, "take sff temp file lock timeout")
+                rval = self.invalid_temp
+                return rval
+
+            with open(path, 'r') as fd1:
+                retval = fd1.read().strip()
+            file_rw_unlock()
+            rval = float(retval) / 1000
+            return rval
+        except Exception as e:
+            fanwarningdebuglog(DEBUG_FANCONTROL, "get_sff_temp error, msg:%s" % str(e))
+            file_rw_unlock()
+            rval = self.invalid_temp
+            return rval
+
+    def gettemp(self, ret):
+        u'''获取入风口、出风口、最热点、CPU温度'''
         temp_conf = MONITOR_DEV_STATUS.get('temperature', None)
 
         if temp_conf is None:
@@ -123,43 +373,51 @@ class FanControl(object):
                 name = item_temp.get('name')
                 location = item_temp.get('location')
                 if name == "cpu":
-                    L=[]
+                    L = []
                     for dirpath, dirnames, filenames in os.walk(location):
-                        for file in filenames :
+                        for file in filenames:
                             if file.endswith("input"):
                                 L.append(os.path.join(dirpath, file))
-                        L =sorted(L,reverse=False)
+                        L = sorted(L, reverse=False)
                     for i in range(len(L)):
-                        nameloc = "%s/temp%d_label"%(location,i+1)
-                        valloc  = "%s/temp%d_input"%(location,i+1)
+                        nameloc = "%s/temp%d_label" % (location, i + 1)
+                        valloc = "%s/temp%d_input" % (location, i + 1)
                         with open(nameloc, 'r') as fd1:
                             retval2 = fd1.read()
                         with open(valloc, 'r') as fd2:
                             retval3 = fd2.read()
-                        ret_t ={}
+                        ret_t = {}
                         ret_t["name"] = retval2.strip()
-                        ret_t["value"] = float(retval3)/1000
+                        ret_t["value"] = float(retval3) / 1000
                         ret.append(ret_t)
-                        fanwarningdebuglog(DEBUG_COMMON,"gettemp %s : %f" % (ret_t["name"],ret_t["value"]))
+                        fanwarningdebuglog(DEBUG_COMMON, "gettemp %s : %f" % (ret_t["name"], ret_t["value"]))
                 else:
                     locations = glob.glob(location)
-                    with open(locations[0], 'r') as fd1:
-                        retval = fd1.read()
-                    rval = float(retval)/1000
-                    ret_t ={}
+                    ret_t = {}
+                    if len(locations) != 0:
+                        if name == "sff":
+                            rval = self.get_sff_temp(locations[0])
+                            ret_t["value"] = rval
+                        else:
+                            with open(locations[0], 'r') as fd1:
+                                retval = fd1.read().strip()
+                            rval = float(retval) / 1000
+                            ret_t["value"] = rval
+                    else:
+                        fanwarningdebuglog(DEBUG_COMMON, "file %s not exist" % (location))
+                        ret_t["value"] = self.invalid_temp
                     ret_t["name"] = name
-                    ret_t["value"] = rval
                     ret.append(ret_t)
-                    fanwarningdebuglog(DEBUG_COMMON,"gettemp %s : %f" % (ret_t["name"],ret_t["value"]))
+                    fanwarningdebuglog(DEBUG_COMMON, "gettemp %s : %f" % (ret_t["name"], ret_t["value"]))
             except Exception as e:
                 fanerror("gettemp error:name:%s" % name)
                 fanerror(str(e))
         return True
 
-    def checkslot(self,ret):
-        u'''get slot present status'''
+    def checkslot(self, ret):
+        u'''获取子卡状态'''
         slots_conf = MONITOR_DEV_STATUS.get('slots', None)
-        slotpresent = MONITOR_DEV_STATUS_DECODE.get('slotpresent',None)
+        slotpresent = MONITOR_DEV_STATUS_DECODE.get('slotpresent', None)
 
         if slots_conf is None or slotpresent is None:
             return False
@@ -178,99 +436,141 @@ class FanControl(object):
                         retval = val
                     else:
                         totalerr -= 1
-                        fanerror(" %s  %s" % (item_slot.get('name'), "lpc read failed"))
+                        fanerror(" %s  %s" % (item_slot.get('name'), "lpc读取失败"))
                 else:
                     bus = item_slot.get('bus')
                     loc = item_slot.get('loc')
                     offset = item_slot.get('offset')
-                    ind, val = rji2cget(bus, loc,offset)
+                    ind, val = rji2cget(bus, loc, offset)
                     if ind == True:
                         retval = val
                     else:
                         totalerr -= 1
-                        fanerror(" %s  %s" % (item_slot.get('name'), "i2c read failed"))
-                if totalerr < 0 :
-                    ret_t["status"] = "NOT OK"
+                        fanerror(" %s  %s" % (item_slot.get('name'), "i2c读取失败"))
+                if totalerr < 0:
+                    ret_t["status"] = "ERR"
                     ret.append(ret_t)
                     continue
-                val_t = (int(retval,16) & (1<< presentbit)) >> presentbit
-                fanwarningdebuglog(DEBUG_COMMON,"%s present:%s" % (item_slot.get('name'),slotpresent.get(val_t)))
+                val_t = (int(retval, 16) & (1 << presentbit)) >> presentbit
+                fanwarningdebuglog(DEBUG_COMMON, "%s present:%s" % (item_slot.get('name'), slotpresent.get(val_t)))
                 if val_t != slotpresent.get('okval'):
-                    ret_t["status"] = "ABSENT"
+                    ret_t["status"] = "ERR"
+                    ret.append(ret_t)
+                    fanwarningdebuglog(DEBUG_COMMON, "%s absent" % (ret_t["id"]))
+                    continue
                 else:
-                    ret_t["status"] = "PRESENT"
+                    file_cfg_enable = item_slot.get('file_cfg_enable', 0)
+                    if file_cfg_enable == 1:
+                        docker_command = ""
+                        docker = item_slot.get('docker', None)
+                        if docker is not None:
+                            docker_command = "docker exec %s" % docker
+                            fanwarningdebuglog(
+                                DEBUG_COMMON, "%s status file in docker:%s." %
+                                (item_slot.get('name'), docker))
+                        file_path = item_slot.get('file_path', "")
+                        rd_command = "%s cat %s" % (docker_command, file_path)
+                        fanwarningdebuglog(DEBUG_COMMON, "get slot status,exec command:%s." % (rd_command))
+                        rd_status, rd_value = rj_os_system(rd_command)
+                        rd_value = rd_value.strip().replace("\r", "").replace("\n", "")
+                        fanwarningdebuglog(DEBUG_COMMON, "%s get value:%s." % (item_slot.get('name'), rd_value))
+                        if rd_status:
+                            ret_t["status"] = "NONE"
+                            fanwarningdebuglog(
+                                DEBUG_COMMON, "%s %s led_status_file:%s not exit" %
+                                (item_slot.get('name'), docker, file_path))
+                        else:
+                            slots_led_status = MONITOR_DEV_STATUS.get('slots_led_status', None)
+                            led_status = slots_led_status.get(rd_value, "ERR")
+                            fanwarningdebuglog(DEBUG_COMMON, "%s led_status:%s" % (ret_t["id"], led_status))
+                            ret_t["status"] = led_status
+                    else:
+                        ret_t["status"] = "PRESENT"
             except Exception as e:
-                ret_t["status"] = "NOT OK"
+                ret_t["status"] = "ERR"
                 totalerr -= 1
                 fanerror("checkslot error")
                 fanerror(str(e))
             ret.append(ret_t)
+        fanwarningdebuglog(DEBUG_COMMON, "finally slot status %s" % (ret))
         return True
 
-    def checkpsu(self,ret):
-        u'''get  psu status present, output and warning'''
+    def checkpsu(self, ret):
+        u'''获取电源状态 在位、输出和告警'''
         psus_conf = MONITOR_DEV_STATUS.get('psus', None)
-        psupresent = MONITOR_DEV_STATUS_DECODE.get('psupresent',None)
-        psuoutput = MONITOR_DEV_STATUS_DECODE.get('psuoutput',None)
-        psualert = MONITOR_DEV_STATUS_DECODE.get('psualert',None)
+        psupresent = MONITOR_DEV_STATUS_DECODE.get('psupresent', None)
+        psuoutput = MONITOR_DEV_STATUS_DECODE.get('psuoutput', None)
+        psualert = MONITOR_DEV_STATUS_DECODE.get('psualert', None)
 
         if psus_conf is None or psupresent is None or psuoutput is None:
             fanerror("checkpsu: config error")
             return False
         for item_psu in psus_conf:
-            totalerr = 0
             try:
                 ret_t = {}
                 ret_t["id"] = item_psu.get('name')
                 ret_t["status"] = ""
-                gettype = item_psu.get('gettype')
+                status, val = self.get_value(item_psu)
+                if status is True:
+                    retval = val
+                else:
+                    fanerror(" %s  %s" % (item_psu.get('name'), val))
+                    ret_t["status"] = "UNKNOWN"
+                    ret.append(ret_t)
+                    continue
+
                 presentbit = item_psu.get('presentbit')
                 statusbit = item_psu.get('statusbit')
                 alertbit = item_psu.get('alertbit')
-                if gettype == "io":
-                    io_addr = item_psu.get('io_addr')
-                    val = io_rd(io_addr)
-                    if val is not None:
-                        retval = val
-                    else:
-                        totalerr -= 1
-                        fanerror(" %s  %s" % (item_psu.get('name'), "lpc read failed"))
-                else:
-                    bus = item_psu.get('bus')
-                    loc = item_psu.get('loc')
-                    offset = item_psu.get('offset')
-                    ind, val = rji2cget(bus, loc,offset)
-                    if ind == True:
-                        retval = val
-                    else:
-                        totalerr -= 1
-                        fanerror(" %s  %s" % (item_psu.get('name'), "i2c read failed"))
-                if totalerr < 0 :
-                    ret_t["status"] = "NOT OK"
+                val_present = (retval & (1 << presentbit)) >> presentbit
+                val_status = (retval & (1 << statusbit)) >> statusbit
+                val_alert = (retval & (1 << alertbit)) >> alertbit
+                fanwarningdebuglog(DEBUG_COMMON, "%s present:%s output:%s alert:%s" %
+                                   (item_psu.get('name'), psupresent.get(val_present), psuoutput.get(val_status), psualert.get(val_alert)))
+
+                if val_present != psupresent.get('okval'):
+                    ret_t["status"] = "ABSENT"
                     ret.append(ret_t)
                     continue
-                val_t = (int(retval,16) & (1<< presentbit)) >> presentbit
-                val_status = (int(retval,16) & (1<< statusbit)) >> statusbit
-                val_alert = (int(retval,16) & (1<< alertbit)) >> alertbit
-                fanwarningdebuglog(DEBUG_COMMON,"%s present:%s output:%s alert:%s" % (item_psu.get('name'),psupresent.get(val_t),psuoutput.get(val_status),psualert.get(val_alert)))
-                if val_t != psupresent.get('okval') or val_status != psuoutput.get('okval') or val_alert != psualert.get('okval'):
-                    totalerr -=1
+
+                clear_fault_conf = item_psu.get('clear_fault', None)
+                if (val_status != psuoutput.get('okval') or val_alert !=
+                        psualert.get('okval')) and clear_fault_conf is not None:
+                    fanwarningdebuglog(DEBUG_COMMON, "%s not OK, try to clear faults" % (item_psu.get('name')))
+                    self.get_value(clear_fault_conf)
+                    fanwarningdebuglog(
+                        DEBUG_COMMON,
+                        "after clear faults, read %s status again" %
+                        (item_psu.get('name')))
+                    status, retval = self.get_value(item_psu)
+                    if status is True:
+                        val_present = (retval & (1 << presentbit)) >> presentbit
+                        val_status = (retval & (1 << statusbit)) >> statusbit
+                        val_alert = (retval & (1 << alertbit)) >> alertbit
+                        fanwarningdebuglog(DEBUG_COMMON, "after clear faults, %s present:%s output:%s alert:%s" %
+                                           (item_psu.get('name'), psupresent.get(val_present), psuoutput.get(val_status), psualert.get(val_alert)))
+                    else:
+                        fanerror(" %s  %s" % (item_psu.get('name'), retval))
+                        ret_t["status"] = "NOT OK"
+                        ret.append(ret_t)
+                        continue
+
+                if val_status != psuoutput.get('okval') or val_alert != psualert.get('okval'):
+                    ret_t["status"] = "NOT OK"
+                else:
+                    ret_t["status"] = "OK"
             except Exception as e:
-                totalerr -= 1
                 fanerror("checkpsu error")
                 fanerror(str(e))
-            if totalerr < 0:
-                ret_t["status"] = "NOT OK"
-            else:
-                ret_t["status"] = "OK"
+                ret_t["status"] = "UNKNOWN"
             ret.append(ret_t)
         return True
 
-    def checkfan(self,ret):
-        u'''get fan status present and roll'''
+    def checkfan(self, ret):
+        u'''获取风扇状态 在位和转动'''
         fans_conf = MONITOR_DEV_STATUS.get('fans', None)
-        fanpresent = MONITOR_DEV_STATUS_DECODE.get('fanpresent',None)
-        fanroll = MONITOR_DEV_STATUS_DECODE.get('fanroll',None)
+        fanpresent = MONITOR_DEV_STATUS_DECODE.get('fanpresent', None)
+        fanroll = MONITOR_DEV_STATUS_DECODE.get('fanroll', None)
 
         if fans_conf is None or fanpresent is None or fanroll is None:
             fanerror("checkfan: config error")
@@ -286,10 +586,12 @@ class FanControl(object):
                 presentloc = presentstatus.get('loc')
                 presentaddr = presentstatus.get('offset')
                 presentbit = presentstatus.get('bit')
-                ind, val = rji2cget(presentbus, presentloc,presentaddr)
+                ind, val = rji2cget(presentbus, presentloc, presentaddr)
                 if ind == True:
-                    val_t = (int(val,16) & (1<< presentbit)) >> presentbit
-                    fanwarningdebuglog(DEBUG_COMMON,"checkfan:%s present status:%s" % (item_fan.get('name'),fanpresent.get(val_t)))
+                    val_t = (int(val, 16) & (1 << presentbit)) >> presentbit
+                    fanwarningdebuglog(
+                        DEBUG_COMMON, "checkfan:%s present status:%s" %
+                        (item_fan.get('name'), fanpresent.get(val_t)))
                     if val_t != fanpresent.get('okval'):
                         ret_t["status"] = "ABSENT"
                         ret.append(ret_t)
@@ -304,14 +606,15 @@ class FanControl(object):
                     statusbit = motor.get('bit', None)
                     ind, val = rji2cget(statusbus, statusloc, statusaddr)
                     if ind == True:
-                        val_t = (int(val,16) & (1<< statusbit)) >> statusbit
-                        fanwarningdebuglog(DEBUG_COMMON,"checkfan:%s roll status:%s" % (motor.get('name'),fanroll.get(val_t)))
+                        val_t = (int(val, 16) & (1 << statusbit)) >> statusbit
+                        fanwarningdebuglog(
+                            DEBUG_COMMON, "checkfan:%s roll status:%s" %
+                            (motor.get('name'), fanroll.get(val_t)))
                         if val_t != fanroll.get('okval'):
                             totalerr -= 1
                     else:
                         totalerr -= 1
-                        fanerror("checkfan: %s " % item_fan.get('name'))
-                        fanerror("get %s status error." % motor["name"])
+                        fanerror("checkfan: %s get %s status error." % item_fan.get('name'), motor["name"])
             except Exception as e:
                 totalerr -= 1
                 fanerror("checkfan error")
@@ -325,7 +628,7 @@ class FanControl(object):
 
     def getCurrentSpeed(self):
         try:
-            loc = fanloc[0].get("location","")
+            loc = fanloc[0].get("location", "")
             sped = get_sysfs_value(loc)
             value = strtoint(sped)
             return value
@@ -334,67 +637,94 @@ class FanControl(object):
             fanerror(str(e))
             return None
 
-    # guarantee the speed is lowest when speed lower than lowest value after speed-adjustment
-    def checkCurrentSpeedSet(self):
-        fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy: guarantee the lowest speed after speed-adjustment")
-        value =  self.getCurrentSpeed()
-        if value is None or value == 0:
-            raise Exception("%%policy: getCurrentSpeed None")
-        elif value < MONITOR_CONST.MIN_SPEED:
-            self.fanSpeedSet(MONITOR_CONST.MIN_SPEED)
-        
-    
-    def fanSpeedSet(self, level):        
+    def present_psu_fan_speed_set(self, psu_status, duty):
+        for status_item in psu_status:
+            psu_id = status_item['id']
+            if (status_item['status'] == "OK"):
+                item_psu = PSU_FAN_FOLLOW.get(psu_id, None)
+                if item_psu is not None:
+                    try:
+                        ret, val = rji2cset_pec(item_psu['bus'], item_psu['loc'],
+                                                item_psu['offset1'], item_psu['value1'])
+                        if ret == False:
+                            fanwarningdebuglog(DEBUG_COMMON, "%s fan speed i2c_pec set failed" % psu_id)
+                            continue
+                        rji2cset_wordpec(item_psu['bus'], item_psu['loc'], item_psu['offset2'], duty)
+                    except Exception as e:
+                        fanwarningdebuglog(DEBUG_COMMON, "present_psu_fan_speed_set error")
+                else:
+                    fanwarningdebuglog(DEBUG_COMMON, "config file get %s cfg failed" % psu_id)
+            else:
+                fanwarningdebuglog(DEBUG_COMMON, "%s is ABSENT" % psu_id)
+        return
+
+    def psu_fan_speed_set(self, duty):
+        psu_status = []
+        ret = self.checkpsu(psu_status)
+        if ret == True:
+            self.present_psu_fan_speed_set(psu_status, duty)
+        else:
+            fanerror("psu_fan_speed_set: get psu config error.")
+        return
+
+    def fanSpeedSet(self, level):
         if level >= MONITOR_CONST.MAX_SPEED:
             level = MONITOR_CONST.MAX_SPEED
+        if level <= MONITOR_CONST.MIN_SPEED:
+            level = MONITOR_CONST.MIN_SPEED
         for item in fanloc:
             try:
-                loc = item.get("location","")
-                write_sysfs_value(loc, "0x%02x"% level )
+                loc = item.get("location", "")
+                write_sysfs_value(loc, "0x%02x" % level)
             except Exception as e:
                 fanerror(str(e))
                 fanerror("%%policy: config fan runlevel error")
-        self.checkCurrentSpeedSet() # guaranteed minimum
-    
+        if PSU_FAN_FOLLOW is not None:  # psu_fan speed follow fan
+            try:
+                duty = round(level * 100 / 255)
+                self.psu_fan_speed_set(duty)
+            except Exception as e:
+                fanerror(str(e))
+                fanerror("%%policy: config psu_fan runlevel error")
+
     def fanSpeedSetMax(self):
         try:
             self.fanSpeedSet(MONITOR_CONST.MAX_SPEED)
         except Exception as e:
             fanerror("%%policy:fanSpeedSetMax failed")
             fanerror(str(e))
-    
-    def fanStatusCheck(self): # fan status check , max speed if fan error
+
+    def fanStatusCheck(self):  # 风扇状态检测，有风扇异常直接全速转
         if self.fanOKNum < MONITOR_CONST.FAN_TOTAL_NUM:
             fanwarninglog("%%DEV_MONITOR-FAN: Normal fan number: %d" % (self.fanOKNum))
-            self.fanSpeedSetMax()
             return False
         return True
 
-    def setFanAttr(self,val):
-        u'''set status of each fan'''
+    def setFanAttr(self, val):
+        u'''设置每个风扇的状态'''
         for item in val:
             fanid = item.get("id")
             fanattr = fanid + "status"
             fanstatus = item.get("status")
-            setattr(FanControl,fanattr,fanstatus)
-            fanwarningdebuglog(DEBUG_COMMON,"fanattr:%s,fanstatus:%s"% (fanattr,fanstatus))
+            setattr(FanControl, fanattr, fanstatus)
+            fanwarningdebuglog(DEBUG_COMMON, "fanattr:%s,fanstatus:%s" % (fanattr, fanstatus))
 
-    def getFanPresentNum(self,curFanStatus):
-        fanoknum = 0;
+    def getFanPresentNum(self, curFanStatus):
+        fanoknum = 0
         for item in curFanStatus:
             if item["status"] == "OK":
                 fanoknum += 1
         self._fanOKNum = fanoknum
-        fanwarningdebuglog(DEBUG_COMMON,"fanOKNum = %d"% self._fanOKNum)
+        fanwarningdebuglog(DEBUG_COMMON, "fanOKNum = %d" % self._fanOKNum)
 
     def getFanStatus(self):
         try:
             curFanStatus = []
             ret = self.checkfan(curFanStatus)
             if ret == True:
-                self.setFanAttr(curFanStatus) 
+                self.setFanAttr(curFanStatus)
                 self.getFanPresentNum(curFanStatus)
-                fanwarningdebuglog(DEBUG_COMMON,"%%policy:getFanStatus success" )
+                fanwarningdebuglog(DEBUG_COMMON, "%%policy:getFanStatus success")
                 return 0
         except AttributeError as e:
             fanerror(str(e))
@@ -402,13 +732,13 @@ class FanControl(object):
             fanerror(str(e))
         return -1
 
-    def getPsuOkNum(self,curPsuStatus):
-        psuoknum = 0;
+    def getPsuOkNum(self, curPsuStatus):
+        psuoknum = 0
         for item in curPsuStatus:
             if item.get("status") == "OK":
                 psuoknum += 1
         self._psuOKNum = psuoknum
-        fanwarningdebuglog(DEBUG_COMMON,"psuOKNum = %d"% self._psuOKNum)
+        fanwarningdebuglog(DEBUG_COMMON, "psuOKNum = %d" % self._psuOKNum)
 
     def getPsuStatus(self):
         try:
@@ -416,7 +746,7 @@ class FanControl(object):
             ret = self.checkpsu(curPsuStatus)
             if ret == True:
                 self.getPsuOkNum(curPsuStatus)
-                fanwarningdebuglog(DEBUG_COMMON,"%%policy:getPsuStatus success" )
+                fanwarningdebuglog(DEBUG_COMMON, "%%policy:getPsuStatus success")
                 return 0
         except AttributeError as e:
             fanerror(str(e))
@@ -427,22 +757,25 @@ class FanControl(object):
     def getMonitorTemp(self, temp):
         for item in temp:
             if item.get('name') == "lm75in":
-                self._intemp = item.get('value',self._intemp)
+                self._intemp = item.get('value', self._intemp)
             if item.get('name') == "lm75out":
-                self._outtemp = item.get('value',self._outtemp)
+                self._outtemp = item.get('value', self._outtemp)
             if item.get('name') == "lm75hot":
-                self._boardtemp = item.get('value',self._boardtemp)
-            if item.get('name') == "Physical id 0":
-                self._cputemp = item.get('value',self._cputemp)
-        fanwarningdebuglog(DEBUG_COMMON,"intemp:%f, outtemp:%f, boadrtemp:%f, cputemp:%f"% (self._intemp,self._outtemp,self._boardtemp,self._cputemp))
+                self._boardtemp = item.get('value', self._boardtemp)
+            if item.get('name') == "Physical id 0" or item.get('name') == "Package id 0":
+                self._cputemp = item.get('value', self._cputemp)
+            if item.get('name') == "sff":
+                self._sfftemp = item.get('value', self._sfftemp)
+        fanwarningdebuglog(DEBUG_COMMON, "intemp:%f, outtemp:%f, boadrtemp:%f, cputemp:%f, sfftemp:%f" %
+                           (self._intemp, self._outtemp, self._boardtemp, self._cputemp, self._sfftemp))
 
     def getTempStatus(self):
         try:
-            monitortemp =[]
+            monitortemp = []
             ret = self.gettemp(monitortemp)
             if ret == True:
                 self.getMonitorTemp(monitortemp)
-                fanwarningdebuglog(DEBUG_COMMON,"%%policy:getTempStatus success" )
+                fanwarningdebuglog(DEBUG_COMMON, "%%policy:getTempStatus success")
                 return 0
         except AttributeError as e:
             fanerror(str(e))
@@ -452,33 +785,33 @@ class FanControl(object):
 
     def getMacStatus_bcmcmd(self):
         try:
-            if waitForDocker(timeout = 0) == True :
+            if waitForDocker(timeout=0) == True:
                 sta, ret = getMacTemp()
                 if sta == True:
-                    self._mac_aver = float(ret.get("average",self._mac_aver))
-                    self._mac_max  = float(ret.get("maximum",self._mac_max))
-                    fanwarningdebuglog(DEBUG_COMMON,"mac_aver:%f, mac_max:%f" % (self.mac_aver,self._mac_max))
+                    self._mac_aver = float(ret.get("average", self._mac_aver))
+                    self._mac_max = float(ret.get("maximum", self._mac_max))
+                    fanwarningdebuglog(DEBUG_COMMON, "mac_aver:%f, mac_max:%f" % (self.mac_aver, self._mac_max))
                 else:
-                    fanwarningdebuglog(DEBUG_COMMON,"%%policy:getMacStatus_bcmcmd failed" )
+                    fanwarningdebuglog(DEBUG_COMMON, "%%policy:getMacStatus_bcmcmd failed")
             else:
-                fanwarningdebuglog(DEBUG_COMMON,"%%policy:getMacStatus_bcmcmd SDK not OK" )
+                fanwarningdebuglog(DEBUG_COMMON, "%%policy:getMacStatus_bcmcmd SDK not OK")
             return 0
         except AttributeError as e:
             fanerror(str(e))
         return -1
 
-    def getMacStatus_sysfs(self,conf):
+    def getMacStatus_sysfs(self, conf):
         try:
             sta, ret = getMacTemp_sysfs(conf)
             if sta == True:
                 self._mac_aver = float(ret) / 1000
                 self._mac_max = float(ret) / 1000
-                fanwarningdebuglog(DEBUG_COMMON,"mac_aver:%f, mac_max:%f" % (self.mac_aver,self._mac_max))
+                fanwarningdebuglog(DEBUG_COMMON, "mac_aver:%f, mac_max:%f" % (self.mac_aver, self._mac_max))
             elif conf.get("try_bcmcmd", 0) == 1:
-                fanwarningdebuglog(DEBUG_COMMON,"get sysfs mac temp failed.try to use bcmcmd")
+                fanwarningdebuglog(DEBUG_COMMON, "get sysfs mac temp failed.try to use bcmcmd")
                 self.getMacStatus_bcmcmd()
             else:
-                fanwarningdebuglog(DEBUG_COMMON,"%%policy:getMacStatus_sysfs failed" )
+                fanwarningdebuglog(DEBUG_COMMON, "%%policy:getMacStatus_sysfs failed")
             return 0
         except AttributeError as e:
             fanerror(str(e))
@@ -496,14 +829,14 @@ class FanControl(object):
             fanerror(str(e))
         return -1
 
-    def settSlotAttr(self,val):
-        u'''set each slot present status attribute'''
+    def settSlotAttr(self, val):
+        u'''设置每个子卡的在位状态属性'''
         for item in val:
             slotid = item.get("id")
             slotattr = slotid + "status"
             slotstatus = item.get("status")
-            setattr(FanControl,slotattr,slotstatus)
-            fanwarningdebuglog(DEBUG_COMMON,"slotattr:%s,slotstatus:%s"% (slotattr,slotstatus))
+            setattr(FanControl, slotattr, slotstatus)
+            fanwarningdebuglog(DEBUG_COMMON, "slotattr:%s,slotstatus:%s" % (slotattr, slotstatus))
 
     def getSlotStatus(self):
         try:
@@ -511,87 +844,145 @@ class FanControl(object):
             ret = self.checkslot(curSlotStatus)
             if ret == True:
                 self.settSlotAttr(curSlotStatus)
-                fanwarningdebuglog(DEBUG_COMMON,"%%policy:getSlotStatus success" )
+                fanwarningdebuglog(DEBUG_COMMON, "%%policy:getSlotStatus success")
         except AttributeError as e:
             fanerror(str(e))
         return 0
 
-    def fanctrol(self): #fan speed-adjustment 
+    def fanctrol(self):  # 风扇调速
+        openloop_pwm = MONITOR_CONST.MIN_SPEED
         try:
-            if self.preIntemp <= -1000:
-                self.preIntemp = self.intemp
-            fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy:previous temperature[%.2f] , current temperature[%.2f]" % (self.preIntemp,self.intemp))
+            if self.preIntemp <= -1000:  # 第一次开环调速
+                openloop_pwm = self.policySpeed(self.intemp)
+                self.pre_openloop_pwm = openloop_pwm
+                fanwarningdebuglog(DEBUG_FANCONTROL, "openloop_pwm = 0x%x" % openloop_pwm)
+                return openloop_pwm
+
+            fanwarningdebuglog(DEBUG_FANCONTROL, "%%policy:前次温度[%.2f] , 本次温度[%.2f]" % (self.preIntemp, self.intemp))
             if self.intemp < MONITOR_CONST.TEMP_MIN:
-                fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy:inlet  %.2f  minimum temperature: %.2f" %(self.intemp,MONITOR_CONST.TEMP_MIN))
-                self.fanSpeedSet(MONITOR_CONST.DEFAULT_SPEED) # default level
-            elif self.intemp >=  MONITOR_CONST.TEMP_MIN and self.intemp > self.preIntemp:
-                fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy:increase temperature")
-                self.policySpeed(self.intemp)
-            elif self.intemp >=  MONITOR_CONST.TEMP_MIN and (self.preIntemp - self.intemp) > MONITOR_CONST.MONITOR_FALL_TEMP:
-                fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy:temperature reduce over %d degree" % MONITOR_CONST.MONITOR_FALL_TEMP)
-                self.policySpeed(self.intemp)
+                fanwarningdebuglog(
+                    DEBUG_FANCONTROL, "%%policy:入风口  %.2f  最小温度: %.2f" %
+                    (self.intemp, MONITOR_CONST.TEMP_MIN))
+                openloop_pwm = MONITOR_CONST.MIN_SPEED  # 默认等级
+            elif self.intemp >= MONITOR_CONST.TEMP_MIN and self.intemp > self.preIntemp:
+                fanwarningdebuglog(DEBUG_FANCONTROL, "%%policy:温度上升")
+                openloop_pwm = self.policySpeed(self.intemp)
+            elif self.intemp >= MONITOR_CONST.TEMP_MIN and (self.preIntemp - self.intemp) > MONITOR_CONST.MONITOR_FALL_TEMP:
+                fanwarningdebuglog(DEBUG_FANCONTROL, "%%policy:温度下降%d度以上" % MONITOR_CONST.MONITOR_FALL_TEMP)
+                openloop_pwm = self.policySpeed(self.intemp)
             else:
-                speed = self.getCurrentSpeed()# set according to current speed, prevent fan watch-dog
-                if speed is not None:
-                    self.fanSpeedSet(speed)
-                fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy:change nothing")
+                openloop_pwm = self.pre_openloop_pwm  # 入风口温度小于等于上次温度,且小于差值，维持上次openloop转速
+                fanwarningdebuglog(DEBUG_FANCONTROL, "%%policy:不做任何改变")
         except Exception as e:
             fanerror("%%policy: fancontrol error")
+            fanerror(str(e))
+        self.pre_openloop_pwm = openloop_pwm
+        fanwarningdebuglog(DEBUG_FANCONTROL, "openloop_pwm = 0x%x" % openloop_pwm)
+        return openloop_pwm
 
-    # start speed-adjustment 
+    def pidmethod(self):  # pid算法
+        # sff
+        pid_value = MONITOR_CONST.MIN_SPEED
+        self._sfftemp = int(self._sfftemp)  # make sure temp is int
+        if self._sfftemp == self.invalid_temp:  # temp is invalid
+            temp = None
+            self.pid.cacl(self.__pwm, "SFF_TEMP", temp)  # temp无效,只为使PID算法记录无效温度
+            pid_value = MONITOR_CONST.MIN_SPEED
+            fanwarningdebuglog(DEBUG_FANCONTROL, "sff_temp is invalid, pid_value = 0x%x" % pid_value)
+            fanwarningdebuglog(DEBUG_FANCONTROL, "sfftemp = %d, invalid_temp = %d" % (self._sfftemp, self.invalid_temp))
+        elif self._sfftemp == self.error_temp:  # temp is error
+            temp = None
+            self.pid.cacl(self.__pwm, "SFF_TEMP", temp)  # temp错误,只为使PID算法记录无效温度
+            pid_value = MONITOR_CONST.MIN_SPEED
+            fanwarningdebuglog(DEBUG_FANCONTROL, "sff_temp is error, pid_value = 0x%x" % pid_value)
+            fanwarningdebuglog(DEBUG_FANCONTROL, "sfftemp = %d, error_temp = %d" % (self._sfftemp, self.error_temp))
+        else:
+            pid_value = self.pid.cacl(self.__pwm, "SFF_TEMP", self._sfftemp)  # self.__pwm为上次调速结果
+        if pid_value is None:
+            pid_value = self.__min_pwm
+        return pid_value
+
+    # 开始调速
     def startFanCtrol(self):
-        self.checkCrit()
-        if self.critnum == 0 and self.checkWarning() == False and self.fanStatusCheck() ==True:
-            self.fanctrol()
-            self.checkDevError()
-        fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy: speed after speed-adjustment is %0x" % (self.getCurrentSpeed()))
+        pwm_list = []
+        pwm_min = MONITOR_CONST.MIN_SPEED
+        pwm_list.append(pwm_min)
+        pwm_max = MONITOR_CONST.MAX_SPEED
 
-    def policySpeed(self, temp): # fan speed-adjustment algorithm
-        fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy:fan speed-adjustment algorithm")
-        sped_level = MONITOR_CONST.DEFAULT_SPEED + MONITOR_CONST.K * (temp - MONITOR_CONST.TEMP_MIN)
-        self.fanSpeedSet(sped_level)
+        if MONITOR_CONST.MONITOR_PID_FLAG == 1:
+            pid_value = self.pidmethod()
+            if pid_value is None:
+                pid_value = pwm_min
+            pwm_list.append(pid_value)
+
+        openloop_value = self.fanctrol()
+        if openloop_value is None:
+            openloop_value = pwm_min
+        pwm_list.append(openloop_value)
+
+        over_crit_pwm = self.checkCrit()
+        pwm_list.append(over_crit_pwm)
+
+        if self.checkWarning() == True:
+            over_warning_pwm = pwm_max
+            pwm_list.append(over_warning_pwm)
+
+        if self.fanStatusCheck() == False:
+            fan_error_pwm = pwm_max
+            pwm_list.append(fan_error_pwm)
+
+        if self.checkDevError() == True:
+            check_dev_error_pwm = MONITOR_CONST.MAC_ERROR_SPEED
+            pwm_list.append(check_dev_error_pwm)
+
+        self.__pwm = max(pwm_list)
+        fanwarningdebuglog(DEBUG_FANCONTROL, "__pwm = 0x%x\n" % self.__pwm)
+        self.fanSpeedSet(self.__pwm)
+
+        fanwarningdebuglog(DEBUG_FANCONTROL, "%%policy:调速完转速:0x%x" % self.__pwm)
+
+    def policySpeed(self, temp):  # 风扇调速策略
+        fanwarningdebuglog(DEBUG_FANCONTROL, "%%policy:调速公式调速")
+        speed_level = MONITOR_CONST.MIN_SPEED + MONITOR_CONST.K * (temp - MONITOR_CONST.TEMP_MIN)
         self.preIntemp = self.intemp
+        return math.ceil(speed_level)
 
-    def getBoardMonitorMsg(self,ledcontrol = False):
+    def getBoardMonitorMsg(self, ledcontrol=False):
         ret_t = 0
         try:
-            ret_t += self.getFanStatus()  # get fan status, get number of fan which status is OK
-            ret_t += self.getTempStatus() # get inlet, outlet, hot-point temperature, CPU temperature
-            ret_t += self.getMacStatus()  # get MAC highest and average temperature
+            ret_t += self.getFanStatus()  # 获取风扇状态，得到OK的风扇个数
+            ret_t += self.getTempStatus()  # 获取入风口，出风口，最热点温度,CPU温度
+            ret_t += self.getMacStatus()  # 获取MAC最高温和平均温
             if ledcontrol == True:
-                ret_t += self.getSlotStatus() # get slot present status
-                ret_t += self.getPsuStatus()  # get psu status
+                ret_t += self.getSlotStatus()  # 获取子卡状态
+                ret_t += self.getPsuStatus()  # 获取OK电源数
             if ret_t == 0:
                 return True
         except Exception as e:
             fanerror(str(e))
         return False
-    
-    # device error algorithm    Tmac-Tin≥50℃, or Tmac-Tin≤-50℃
+
+    # 器件失败策略    Tmac-Tin≥50℃，或者Tmac-Tin≤-50℃
     def checkDevError(self):
         try:
-            if (self.mac_aver - self.intemp) >= MONITOR_CONST.MAC_UP_TEMP or (self.mac_aver - self.intemp) <= MONITOR_CONST.MAC_LOWER_TEMP:
-                fanwarningdebuglog(DEBUG_FANCONTROL,"%%DEV_MONITOR-TEMP: MAC temp get failed.")
-                value =  self.getCurrentSpeed()
-                if MONITOR_CONST.MAC_ERROR_SPEED >= value:
-                    self.fanSpeedSet(MONITOR_CONST.MAC_ERROR_SPEED)
-                else:
-                    self.fanSpeedSetMax()
-            else:
-                pass
+            if (self.mac_aver - self.intemp) >= MONITOR_CONST.MAC_UP_TEMP or (self.mac_aver -
+                                                                              self.intemp) <= MONITOR_CONST.MAC_LOWER_TEMP:
+                fanwarningdebuglog(DEBUG_FANCONTROL, "%%DEV_MONITOR-TEMP: MAC temp get failed.")
+                return True
         except Exception as e:
             fanerror("%%policy:checkDevError failed")
             fanerror(str(e))
+        return False
 
     def checkTempWarning(self):
-        u'''check whether temperature above the normal alarm value'''
+        u'''判断温度是否出现普通告警'''
         try:
             if self._mac_aver >= MONITOR_CONST.MAC_WARNING_THRESHOLD \
-            or self._outtemp >= MONITOR_CONST.OUTTEMP_WARNING_THRESHOLD \
-            or self._boardtemp >= MONITOR_CONST.BOARDTEMP_WARNING_THRESHOLD \
-            or self._cputemp>=MONITOR_CONST.CPUTEMP_WARNING_THRESHOLD \
-            or self._intemp >=MONITOR_CONST.INTEMP_WARNING_THRESHOLD:
-                fanwarningdebuglog(DEBUG_COMMON,"check whether temperature above the normal alarm value")
+                    or self._outtemp >= MONITOR_CONST.OUTTEMP_WARNING_THRESHOLD \
+                    or self._boardtemp >= MONITOR_CONST.BOARDTEMP_WARNING_THRESHOLD \
+                    or self._cputemp >= MONITOR_CONST.CPUTEMP_WARNING_THRESHOLD \
+                    or self._intemp >= MONITOR_CONST.INTEMP_WARNING_THRESHOLD:
+                fanwarningdebuglog(DEBUG_COMMON, "温度超过普通告警值")
                 return True
         except Exception as e:
             fanerror("%%policy: checkTempWarning failed")
@@ -599,14 +990,14 @@ class FanControl(object):
         return False
 
     def checkTempCrit(self):
-        u'''check whether temperature above the critical alarm value'''
+        u'''判断温度是否出现严重告警'''
         try:
             if self._mac_aver >= MONITOR_CONST.MAC_CRITICAL_THRESHOLD \
-            or ( self._outtemp >= MONITOR_CONST.OUTTEMP_CRITICAL_THRESHOLD \
-            and self._boardtemp >= MONITOR_CONST.BOARDTEMP_CRITICAL_THRESHOLD \
-            and self._cputemp>= MONITOR_CONST.CPUTEMP_CRITICAL_THRESHOLD \
-            and self._intemp >= MONITOR_CONST.INTEMP_CRITICAL_THRESHOLD):
-                fanwarningdebuglog(DEBUG_COMMON,"temperature above the critical alarm value")
+                or (self._outtemp >= MONITOR_CONST.OUTTEMP_CRITICAL_THRESHOLD
+                    and self._boardtemp >= MONITOR_CONST.BOARDTEMP_CRITICAL_THRESHOLD
+                    and self._cputemp >= MONITOR_CONST.CPUTEMP_CRITICAL_THRESHOLD
+                    and self._intemp >= MONITOR_CONST.INTEMP_CRITICAL_THRESHOLD):
+                fanwarningdebuglog(DEBUG_COMMON, "温度超过严重告警值")
                 return True
         except Exception as e:
             fanerror("%%policy: checkTempCrit failed")
@@ -614,31 +1005,31 @@ class FanControl(object):
         return False
 
     def checkFanStatus(self):
-        u'''check fan status'''
+        u'''检测风扇状态'''
         for item in MONITOR_FAN_STATUS:
             maxoknum = item.get('maxOkNum')
             minoknum = item.get('minOkNum')
             status = item.get('status')
-            if self.fanOKNum >= minoknum and self.fanOKNum <= maxoknum :
-                fanwarningdebuglog(DEBUG_COMMON,"checkFanStatus:fanOKNum:%d,status:%s" % (self.fanOKNum,status))
+            if self.fanOKNum >= minoknum and self.fanOKNum <= maxoknum:
+                fanwarningdebuglog(DEBUG_COMMON, "checkFanStatus:fanOKNum:%d,status:%s" % (self.fanOKNum, status))
                 return status
-        fanwarningdebuglog(DEBUG_COMMON,"checkFanStatus Error:fanOKNum:%d" % (self.fanOKNum))
+        fanwarningdebuglog(DEBUG_COMMON, "checkFanStatus Error:fanOKNum:%d" % (self.fanOKNum))
         return None
 
     def checkPsuStatus(self):
-        u'''check psu status'''
+        u'''检测电源状态'''
         for item in MONITOR_PSU_STATUS:
             maxoknum = item.get('maxOkNum')
             minoknum = item.get('minOkNum')
             status = item.get('status')
-            if self.psuOKNum >= minoknum and self.psuOKNum <= maxoknum :
-                fanwarningdebuglog(DEBUG_COMMON,"checkPsuStatus:psuOKNum:%d,status:%s" % (self.psuOKNum,status))
+            if self.psuOKNum >= minoknum and self.psuOKNum <= maxoknum:
+                fanwarningdebuglog(DEBUG_COMMON, "checkPsuStatus:psuOKNum:%d,status:%s" % (self.psuOKNum, status))
                 return status
-        fanwarningdebuglog(DEBUG_COMMON,"checkPsuStatus Error:psuOKNum:%d" % (self.psuOKNum))
+        fanwarningdebuglog(DEBUG_COMMON, "checkPsuStatus Error:psuOKNum:%d" % (self.psuOKNum))
         return None
 
     def dealSysLedStatus(self):
-        u'''set up SYSLED according to temperature, fan and psu status'''
+        u'''根据温度，风扇和电源状态设置SYSLED'''
         try:
             fanstatus = self.checkFanStatus()
             psustatus = self.checkPsuStatus()
@@ -649,105 +1040,109 @@ class FanControl(object):
             else:
                 status = "green"
             self.setSysLed(status)
-            fanwarningdebuglog(DEBUG_LEDCONTROL,"%%ledcontrol:dealSysLedStatus success, status:%s," % status)
+            fanwarningdebuglog(DEBUG_LEDCONTROL, "%%ledcontrol:dealSysLedStatus success, status:%s," % status)
         except Exception as e:
             fanerror(str(e))
 
     def dealSysFanLedStatus(self):
-        u'''light panel fan led according to status'''
+        u'''根据状态点面板风扇灯'''
         try:
             status = self.checkFanStatus()
             if status is not None:
                 self.setSysFanLed(status)
-                fanwarningdebuglog(DEBUG_LEDCONTROL,"%%ledcontrol:dealSysFanLedStatus success, status:%s," % status)
+                fanwarningdebuglog(DEBUG_LEDCONTROL, "%%ledcontrol:dealSysFanLedStatus success, status:%s," % status)
         except Exception as e:
             fanerror("%%ledcontrol:dealSysLedStatus error")
             fanerror(str(e))
 
     def dealPsuLedStatus(self):
-        u'''set up PSU-LED according to psu status'''
+        u'''根据电源状态设置PSU-LED'''
         try:
             status = self.checkPsuStatus()
             if status is not None:
                 self.setSysPsuLed(status)
-            fanwarningdebuglog(DEBUG_LEDCONTROL,"%%ledcontrol:dealPsuLedStatus success, status:%s," % status)
+            fanwarningdebuglog(DEBUG_LEDCONTROL, "%%ledcontrol:dealPsuLedStatus success, status:%s," % status)
         except Exception as e:
             fanerror("%%ledcontrol:dealPsuLedStatus error")
             fanerror(str(e))
 
     def dealLocFanLedStatus(self):
-        u'''light fan led according to fan status'''
+        u'''根据风扇状态点风扇本体灯'''
         for item in MONITOR_FANS_LED:
             try:
                 index = MONITOR_FANS_LED.index(item) + 1
                 fanattr = "fan%dstatus" % index
-                val_t = getattr(FanControl,fanattr,None)
+                val_t = getattr(FanControl, fanattr, None)
                 if val_t == "NOT OK":
-                    rji2cset(item["bus"],item["devno"],item["addr"], item["red"])
+                    rji2cset(item["bus"], item["devno"], item["addr"], item["red"])
                 elif val_t == "OK":
-                    rji2cset(item["bus"],item["devno"],item["addr"], item["green"])
+                    rji2cset(item["bus"], item["devno"], item["addr"], item["green"])
                 else:
                     pass
-                fanwarningdebuglog(DEBUG_LEDCONTROL,"%%ledcontrol:dealLocFanLed success.fanattr:%s, status:%s"% (fanattr,val_t))
+                fanwarningdebuglog(
+                    DEBUG_LEDCONTROL, "%%ledcontrol:dealLocFanLed success.fanattr:%s, status:%s" %
+                    (fanattr, val_t))
             except Exception as e:
                 fanerror("%%ledcontrol:dealLocFanLedStatus error")
                 fanerror(str(e))
 
     def dealSlotLedStatus(self):
-        u'''light slot status led according to slot present status'''
-        slotLedList = DEV_LEDS.get("SLOTLED",[])
+        u'''根据子卡在位状态点子卡状态灯'''
+        slotLedList = DEV_LEDS.get("SLOTLED", [])
+        slots_led_cfg = DEV_LEDS.get("slots_led_cfg", [])
         for item in slotLedList:
             try:
                 index = slotLedList.index(item) + 1
                 slotattr = "slot%dstatus" % index
-                val_t = getattr(FanControl,slotattr,None)
-                if val_t == "PRESENT":
-                    rji2cset(item["bus"],item["devno"],item["addr"], item["green"])
-                fanwarningdebuglog(DEBUG_LEDCONTROL,"%%ledcontrol:dealSlotLedStatus success.slotattr:%s, status:%s"% (slotattr,val_t))
+                val_t = getattr(FanControl, slotattr, None)
+                color = slots_led_cfg.get(val_t, "red")
+                self.setled(item, color)
+                fanwarningdebuglog(
+                    DEBUG_LEDCONTROL, "%%ledcontrol:dealSlotLedStatus success.slotattr:%s, status:%s" %
+                    (slotattr, val_t))
             except Exception as e:
                 fanerror("%%ledcontrol:dealSlotLedStatus error")
                 fanerror(str(e))
 
-    def dealBmcLedstatus(self,val):
+    def dealBmcLedstatus(self, val):
         pass
 
-    def dealLctLedstatus(self,val):
+    def dealLctLedstatus(self, val):
         pass
 
     def setled(self, item, color):
         if item.get('type', 'i2c') == 'sysfs':
             rjsysset(item["cmdstr"], item.get(color))
-        else :
+        else:
             mask = item.get('mask', 0xff)
             ind, val = rji2cget(item["bus"], item["devno"], item["addr"])
             if ind == True:
-                setval = (int(val,16) & ~mask) | item.get(color)
+                setval = (int(val, 16) & ~mask) | item.get(color)
                 rji2cset(item["bus"], item["devno"], item["addr"], setval)
             else:
-                fanerror("led %s" % "i2c read failed")
+                fanwarningdebuglog(DEBUG_LEDCONTROL, "led %s" % "i2c读取失败")  # 线卡不在位，点灯寄存器会读失败
 
-    def setSysLed(self,color):
+    def setSysLed(self, color):
         for item in MONITOR_SYS_LED:
             self.setled(item, color)
 
-    def setSysFanLed(self,color):
+    def setSysFanLed(self, color):
         for item in MONITOR_SYS_FAN_LED:
             self.setled(item, color)
 
-    def setSysPsuLed(self,color):
+    def setSysPsuLed(self, color):
         for item in MONITOR_SYS_PSU_LED:
             self.setled(item, color)
 
     def checkWarning(self):
         try:
             if self.checkTempWarning() == True:
-                fanwarningdebuglog(DEBUG_FANCONTROL,"anti-shake start")
+                fanwarningdebuglog(DEBUG_FANCONTROL, "防抖开始")
                 time.sleep(MONITOR_CONST.SHAKE_TIME)
-                fanwarningdebuglog(DEBUG_FANCONTROL,"anti-shake end")
-                self.getBoardMonitorMsg()# re-read
+                fanwarningdebuglog(DEBUG_FANCONTROL, "防抖结束")
+                self.getBoardMonitorMsg()  # 再读一次
                 if self.checkTempWarning() == True:
                     fanwarninglog("%%DEV_MONITOR-TEMP:The temperature of device is over warning value.")
-                    self.fanSpeedSetMax()  # fan full speed
                     return True
         except Exception as e:
             fanerror("%%policy: checkWarning failed")
@@ -755,59 +1150,96 @@ class FanControl(object):
         return False
 
     def checkCrit(self):
+        over_crit_pwm = MONITOR_CONST.MIN_SPEED
+        reboot_flag = False
         try:
             if self.checkTempCrit() == True:
-                fanwarningdebuglog(DEBUG_FANCONTROL,"anti-shake start")
-                time.sleep(MONITOR_CONST.SHAKE_TIME)
-                fanwarningdebuglog(DEBUG_FANCONTROL,"anti-shake end")
-                self.getBoardMonitorMsg()# re-read
-                if self.checkTempCrit() == True:
-                    fancriticallog("%%DEV_MONITOR-TEMP:The temperature of device is over critical value.")
-                    self.fanSpeedSetMax()  # fan full speed
-                    self.critnum += 1 # anti-shake
-                    if self.critnum >= MONITOR_CONST.CRITICAL_NUM:
-                       os.system("reboot")
-                    fanwarningdebuglog(DEBUG_FANCONTROL,"crit次数:%d" % self.critnum)
-                else:
-                    self.critnum = 0
-            else:
-                self.critnum = 0
+                over_crit_pwm = MONITOR_CONST.MAX_SPEED
+                self.fanSpeedSet(over_crit_pwm)
+                for i in range(MONITOR_CONST.CRITICAL_NUM):
+                    time.sleep(MONITOR_CONST.SHAKE_TIME)
+                    self.getBoardMonitorMsg()  # 再读一次
+                    if self.checkTempCrit() == True:
+                        fancriticallog("%%DEV_MONITOR-TEMP:The temperature of device is over reboot critical value.")
+                        reboot_flag = True
+                        continue
+                    else:
+                        fancriticallog("%%DEV_MONITOR-TEMP:The temperature of device is not over reboot critical value.")
+                        reboot_flag = False
+                        break
+                if reboot_flag is True:
+                    reboot_log = "The temperature of device is over critical value."
+                    reboot_log_cmd = "echo '%s' > /dev/ttyS0" % reboot_log
+                    fancriticallog(reboot_log)
+                    exec_os_cmd(reboot_log_cmd)
+                    reboot_log = "The system is going to reboot now."
+                    reboot_log_cmd = "echo '%s' > /dev/ttyS0" % reboot_log
+                    fancriticallog(reboot_log)
+                    exec_os_cmd(reboot_log_cmd)
+                    fancriticallog("self._intemp = %d" % self._intemp)
+                    fancriticallog("self._mac_aver = %d" % self._mac_aver)
+                    fancriticallog("self._mac_max = %d" % self._mac_max)
+                    fancriticallog("self._outtemp = %d" % self._outtemp)
+                    fancriticallog("self._boardtemp = %d" % self._boardtemp)
+                    fancriticallog("self._cputemp = %d" % self._cputemp)
+                    create_judge_file = "touch %s" % OTP_REBOOT_JUDGE_FILE
+                    exec_os_cmd(create_judge_file)
+                    exec_os_cmd("sync")
+                    time.sleep(3)
+                    os.system("/sbin/reboot")
         except Exception as e:
             fanerror("%%policy: checkCrit failed")
             fanerror(str(e))
-            
+        return over_crit_pwm
+
 
 def callback():
     pass
 
+
 def doFanCtrol(fanCtrol):
     ret = fanCtrol.getBoardMonitorMsg()
-    if ret==True:
-        fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy:startFanCtrol")
+    if ret == True:
+        fanwarningdebuglog(DEBUG_FANCONTROL, "%%policy:startFanCtrol")
         fanCtrol.startFanCtrol()
     else:
         fanCtrol.fanSpeedSetMax()
-        fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy:getBoardMonitorMsg error")
-    
+        fanwarningdebuglog(DEBUG_FANCONTROL, "%%policy:getBoardMonitorMsg error")
+
+
 def doLedCtrol(fanCtrol):
-    fanCtrol.getBoardMonitorMsg(ledcontrol = True) # get status
-    fanCtrol.dealSysLedStatus()        # light system led
-    fanCtrol.dealSysFanLedStatus()     # light panel fan led
-    fanCtrol.dealLocFanLedStatus()     # light fan led
-    fanCtrol.dealPsuLedStatus()        # light psu led
-    fanCtrol.dealSlotLedStatus()       # light slot status led
-    fanwarningdebuglog(DEBUG_LEDCONTROL,"%%ledcontrol:doLedCtrol success")
+    fanCtrol.getBoardMonitorMsg(ledcontrol=True)  # 获取状态
+    fanCtrol.dealSysLedStatus()        # 点系统灯
+    fanCtrol.dealSysFanLedStatus()     # 点面板风扇灯
+    fanCtrol.dealLocFanLedStatus()     # 点风扇本体灯
+    fanCtrol.dealPsuLedStatus()        # 点面板PSU灯
+    fanCtrol.dealSlotLedStatus()       # 点子卡状态灯
+    fanwarningdebuglog(DEBUG_LEDCONTROL, "%%ledcontrol:doLedCtrol success")
+
+
+def debug_init():
+    global debuglevel
+    try:
+        with open(FANCTROL_DEBUG_FILE, "r") as fd:
+            value = fd.read()
+        debuglevel = int(value)
+    except Exception as e:
+        debuglevel = 0
+    return
+
 
 def run(interval, fanCtrol):
-    loop = 0
+    loop = MONITOR_CONST.MONITOR_INTERVAL
     # waitForDocker()
     while True:
         try:
-            if loop % MONITOR_CONST.MONITOR_INTERVAL ==0: # fan speed-adjustment
-                fanwarningdebuglog(DEBUG_FANCONTROL,"%%policy:fanCtrol")
+            debug_init()
+            if loop >= MONITOR_CONST.MONITOR_INTERVAL:  # 风扇调速
+                loop = 0
+                fanwarningdebuglog(DEBUG_FANCONTROL, "%%policy:fanCtrol")
                 doFanCtrol(fanCtrol)
             else:
-                fanwarningdebuglog(DEBUG_LEDCONTROL,"%%ledcontrol:start ledctrol")# LED control
+                fanwarningdebuglog(DEBUG_LEDCONTROL, "%%ledcontrol:start ledctrol")  # LED控制
                 doLedCtrol(fanCtrol)
             time.sleep(interval)
             loop += interval
@@ -815,24 +1247,28 @@ def run(interval, fanCtrol):
             traceback.print_exc()
             fanerror(str(e))
 
+
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 def main():
     '''device operator'''
     pass
-    
+
+
 @main.command()
 def start():
     '''start fan control'''
-    fanwarninglog("FANCTROL start")
+    faninfo("FANCTROL start")
     fanCtrol = FanControl()
-    interval = MONITOR_CONST.MONITOR_INTERVAL /30
+    interval = MONITOR_CONST.MONITOR_LED_INTERVAL
     run(interval, fanCtrol)
+
 
 @main.command()
 def stop():
     '''stop fan control '''
-    fanwarninglog("stop")
+    faninfo("stop")
 
-##device_i2c operation
+
+# device_i2c operation
 if __name__ == '__main__':
     main()

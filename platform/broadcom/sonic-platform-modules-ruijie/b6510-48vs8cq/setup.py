@@ -3,19 +3,22 @@ from setuptools import setup
 setup(
     name='sonic-platform',
     version='1.0',
-    description='SONiC platform API implementation on RUIJIE B6510 Platforms',
+    description='SONiC platform API implementation on Ruijie B6510-48VS8CQ Platforms',
     license='Apache 2.0',
     author='SONiC Team',
     author_email='sonic_rd@ruijie.com.cn',
     url='',
-    maintainer='RUIJIE B6510',
+    maintainer='Ruijie B6510-48VS8CQ',
     maintainer_email='',
     packages=[
         'sonic_platform',
         'plat_hal',
         'rjutil',
         'eepromutil',
-        'sonic_pcie'
+        'hal-config',
+    ],
+    py_modules=[
+        'hal_pltfm',
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',

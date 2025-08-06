@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: UTF-8 -*-
 """smbus2 - A drop-in replacement for smbus-cffi/smbus-python"""
 # The MIT License (MIT)
 # Copyright (c) 2017 Karl-Petter Lindegaard
@@ -32,6 +34,7 @@ I2C_SLAVE_FORCE = 0x0706  # Use this slave address, even if it is already in use
 I2C_FUNCS = 0x0705  # Get the adapter functionality mask
 I2C_RDWR = 0x0707  # Combined R/W transfer (one STOP only)
 I2C_SMBUS = 0x0720  # SMBus transfer. Takes pointer to i2c_smbus_ioctl_data
+I2C_PEC = 0x0708
 
 # SMBus transfer read or write markers from uapi/linux/i2c.h
 I2C_SMBUS_WRITE = 0
@@ -43,7 +46,8 @@ I2C_SMBUS_BYTE = 1
 I2C_SMBUS_BYTE_DATA = 2
 I2C_SMBUS_WORD_DATA = 3
 I2C_SMBUS_PROC_CALL = 4
-I2C_SMBUS_BLOCK_DATA = 5  # This isn't supported by Pure-I2C drivers with SMBUS emulation, like those in RaspberryPi, OrangePi, etc :(
+# This isn't supported by Pure-I2C drivers with SMBUS emulation, like those in RaspberryPi, OrangePi, etc :(
+I2C_SMBUS_BLOCK_DATA = 5
 I2C_SMBUS_BLOCK_PROC_CALL = 7  # Like I2C_SMBUS_BLOCK_DATA, it isn't supported by Pure-I2C drivers either.
 I2C_SMBUS_I2C_BLOCK_DATA = 8
 I2C_SMBUS_BLOCK_MAX = 32
@@ -51,7 +55,7 @@ I2C_SMBUS_BLOCK_MAX = 32
 # To determine what functionality is present (uapi/linux/i2c.h)
 try:
     from enum import IntFlag
-except ImportError:
+except BaseException:
     IntFlag = int
 
 
@@ -216,12 +220,12 @@ class i2c_msg(Structure):
         :rtype: :py:class:`i2c_msg`
         """
         if sys.version_info.major >= 3:
-            if type(buf) is str:
+            if isinstance(buf, str):
                 buf = bytes(map(ord, buf))
             else:
                 buf = bytes(buf)
         else:
-            if type(buf) is not str:
+            if not isinstance(buf, str):
                 buf = ''.join([chr(x) for x in buf])
         arr = create_string_buffer(buf, len(buf))
         return i2c_msg(
@@ -406,7 +410,7 @@ class SMBus(object):
         :rtype: int
         """
         val_t = -1
-        returnmsg=""
+        returnmsg = ""
         try:
             self._set_address(i2c_addr, force=force)
             msg = i2c_smbus_ioctl_data.create(
@@ -452,6 +456,40 @@ class SMBus(object):
         else:
             return True, ""
 
+    def write_byte_data_pec(self, i2c_addr, register, value, force=None):
+        """
+        Write a byte to a given register.
+
+        :param i2c_addr: i2c address
+        :type i2c_addr: int
+        :param register: Register to write to
+        :type register: int
+        :param value: Byte value to transmit
+        :type value: int
+        :param force:
+        :type force: Boolean
+        :rtype: None
+        """
+        val_t = -1
+        returnmsg = ""
+        try:
+            val_t = ioctl(self.fd, I2C_PEC, 1)
+            if val_t < 0:
+                raise Exception("set pec mod error")
+            self._set_address(i2c_addr, force=force)
+            msg = i2c_smbus_ioctl_data.create(
+                read_write=I2C_SMBUS_WRITE, command=register, size=I2C_SMBUS_BYTE_DATA
+            )
+            msg.data.contents.byte = value
+            val_t = ioctl(self.fd, I2C_SMBUS, msg)
+        except Exception as e:
+            returnmsg = str(e)
+            self.close()
+        if val_t < 0:
+            return False, returnmsg or ""
+        else:
+            return True, ""
+
     def read_word_data(self, i2c_addr, register, force=None):
         """
         Read a single word (2 bytes) from a given register.
@@ -480,6 +518,40 @@ class SMBus(object):
             return False, returnmsg or ""
         else:
             return True, msg.data.contents.word
+
+    def write_word_data_pec(self, i2c_addr, register, value, force=None):
+        """
+        Write a byte to a given register.
+
+        :param i2c_addr: i2c address
+        :type i2c_addr: int
+        :param register: Register to write to
+        :type register: int
+        :param value: Word value to transmit
+        :type value: int
+        :param force:
+        :type force: Boolean
+        :rtype: None
+        """
+        val_t = -1
+        returnmsg = ""
+        try:
+            val_t = ioctl(self.fd, I2C_PEC, 1)
+            if val_t < 0:
+                raise Exception("set pec mod error")
+            self._set_address(i2c_addr, force=force)
+            msg = i2c_smbus_ioctl_data.create(
+                read_write=I2C_SMBUS_WRITE, command=register, size=I2C_SMBUS_WORD_DATA
+            )
+            msg.data.contents.word = value
+            val_t = ioctl(self.fd, I2C_SMBUS, msg)
+        except Exception as e:
+            returnmsg = str(e)
+            self.close()
+        if val_t < 0:
+            return False, returnmsg or ""
+        else:
+            return True, ""
 
     def write_word_data(self, i2c_addr, register, value, force=None):
         """
@@ -685,6 +757,7 @@ class SMBusWrapper:
     :py:class:`SMBus` handle will be automatically closed
     upon exit of the ``with`` block.
     """
+
     def __init__(self, bus_number=0, auto_cleanup=True, force=False):
         """
         :param auto_cleanup: Close bus when leaving scope.

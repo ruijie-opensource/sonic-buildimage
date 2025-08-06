@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
+import sys
 import click
+import os
+import subprocess
 import time
+from ruijieutil import *
 import syslog
+from monitor import status
 import traceback
-from ruijieutil import waitForDocker, STARTMODULE, AVSUTIL
 try:
     from rest.rest import BMCMessage
-except ImportError:
+except BaseException:
     pass
 
+AVS_DEBUG_FILE = "/etc/.avs_debug_flag"
+
+AVSDEDEBUG = 1
+
+debuglevel = 0
+
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+
 
 class AliasedGroup(click.Group):
     def get_command(self, ctx, cmd_name):
@@ -24,25 +35,41 @@ class AliasedGroup(click.Group):
         elif len(matches) == 1:
             return click.Group.get_command(self, ctx, matches[0])
         ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))
-    
+
+
+def debug_init():
+    global debuglevel
+    if os.path.exists(AVS_DEBUG_FILE):
+        debuglevel = debuglevel | AVSDEDEBUG
+    else:
+        debuglevel = debuglevel & ~(AVSDEDEBUG)
+
+
 def avswarninglog(s):
-    s = s.decode('utf-8').encode('gb2312')
-    syslog.openlog("AVSCONTROL",syslog.LOG_PID)
-    syslog.syslog(syslog.LOG_WARNING,s)
-    
+    syslog.openlog("AVSCONTROL", syslog.LOG_PID)
+    syslog.syslog(syslog.LOG_WARNING, s)
+
+
 def avscriticallog(s):
-    s = s.decode('utf-8').encode('gb2312')
-    syslog.openlog("AVSCONTROL",syslog.LOG_PID)
-    syslog.syslog(syslog.LOG_CRIT,s)
-    
+    syslog.openlog("AVSCONTROL", syslog.LOG_PID)
+    syslog.syslog(syslog.LOG_CRIT, s)
+
+
 def avserror(s):
-    s = s.decode('utf-8').encode('gb2312')
-    syslog.openlog("AVSCONTROL",syslog.LOG_PID)
-    syslog.syslog(syslog.LOG_ERR,s)
-    
+    syslog.openlog("AVSCONTROL", syslog.LOG_PID)
+    syslog.syslog(syslog.LOG_ERR, s)
+
+
 def avsinfo(s):
-    syslog.openlog("AVSCONTROL",syslog.LOG_PID)
-    syslog.syslog(syslog.LOG_INFO,s)
+    syslog.openlog("AVSCONTROL", syslog.LOG_PID)
+    syslog.syslog(syslog.LOG_INFO, s)
+
+
+def avsdebuglog(s):
+    if AVSDEDEBUG & debuglevel:
+        syslog.openlog("AVSCONTROL", syslog.LOG_PID)
+        syslog.syslog(syslog.LOG_DEBUG, s)
+
 
 def doAvsCtrol():
     index = 0
@@ -50,13 +77,13 @@ def doAvsCtrol():
     while True:
         if "avscontrol_restful" in STARTMODULE and STARTMODULE['avscontrol_restful'] == 1:
             try:
-                #for alibmc rest.py has define get_macrov_value function
+                macrov_value = -1
                 get_macrov_value = getattr(BMCMessage(), "get_macrov_value", None)
                 if callable(get_macrov_value):
                     macrov_value = int(get_macrov_value())
                 else:
                     macrov_value = int(BMCMessage().getBmcValue(url))
-                if  macrov_value >= 0:
+                if macrov_value >= 0:
                     break
             except Exception as e:
                 time.sleep(2)
@@ -64,37 +91,44 @@ def doAvsCtrol():
         else:
             if AVSUTIL.mac_adj():
                 break
- 
+
         index += 1
         if index >= 10:
             avserror("%%DEV_MONITOR-AVS: MAC Voltage adjust failed.")
             exit(-1)
     avsinfo("%%AVSCONTROL success")
+    time.sleep(5)
     exit(0)
-    
+
+
 def run(interval):
     while True:
         try:
-            if waitForDocker(timeout = 0) == True:
-                time.sleep(10)  # w10s
+            if waitForDocker(timeout=0) == True:
+                time.sleep(10)  # docker起来再等10s
                 doAvsCtrol()
+            avsdebuglog("DEV_MONITOR-AVS: waitting sdk start-up.")
             time.sleep(interval)
         except Exception as e:
             traceback.print_exc()
             print(e)
 
+
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 def main():
     '''device operator'''
     pass
-    
+
+
 @main.command()
 def start():
     '''start AVS control'''
     avsinfo("%%AVSCONTROL start")
+    debug_init()
     interval = 5
     run(interval)
 
-##device_i2c operation
+
+# device_i2c operation
 if __name__ == '__main__':
     main()

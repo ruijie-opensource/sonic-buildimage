@@ -1,0 +1,14 @@
+[Unit]
+Description= Show Psu And Fan Status
+After=rg_platform_driver.service
+Requires=rg_platform_driver.service
+#DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devstatus.py start
+ExecStop=/usr/local/bin/devstatus.py stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

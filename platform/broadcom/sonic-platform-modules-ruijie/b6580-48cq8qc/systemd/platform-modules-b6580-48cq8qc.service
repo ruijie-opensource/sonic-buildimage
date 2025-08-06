@@ -1,0 +1,13 @@
+[Unit]
+Description=b6580-48cq8qc Platform modules
+Before=pmon.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/b6580-48cq8qc_platform.sh init
+ExecStop=/usr/local/bin/b6580-48cq8qc_platform.sh deinit
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
